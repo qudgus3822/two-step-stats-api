@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    // [변경: 2026-07-14 14:09, 김병현 수정] deleteOutDir(true) + incremental(true) 충돌로 dist가 비워진 채 안 만들어지는 문제 방지 — 빌드에서는 incremental 끔(매번 전체 재컴파일)
+    "incremental": false
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "scripts", "test", "**/*.spec.ts"]
+}

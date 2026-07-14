@@ -1,0 +1,29 @@
+// Prisma 스키마: 정규화된 농구 스탯 이벤트 로그를 Postgres(Supabase)에 저장한다.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// 스탯 이벤트: 엑셀 Rawdata 왼쪽 표 한 행 = 한 레코드 (롱 포맷 이벤트 로그)
+// 박스스코어/랭킹 등 모든 파생 스탯은 이 테이블을 집계해서 계산한다.
+model StatEvent {
+  id        Int      @id @default(autoincrement())
+  season    String // 시즌/파일 라벨
+  week      Int // 주차
+  game      Int // 주차 내 경기 번호
+  quarter   Int // 쿼터
+  player    String // 선수 이름
+  stat      String // 스텟 코드 (대문자 정규화)
+  team      String // 팀명
+  createdAt DateTime @default(now())
+
+  @@index([season])
+  @@index([season, week, game])
+  @@index([player])
+  @@map("stat_events")
+}

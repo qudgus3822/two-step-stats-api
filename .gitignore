@@ -1,0 +1,33 @@
+# 의존성
+/node_modules
+
+# 빌드 산출물
+/dist
+
+# 런타임 데이터 (업로드된 이벤트 저장 파일)
+/data/*.json
+
+# 로그 / 환경변수
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+.env
+.env.*
+!.env.example
+
+# 테스트 커버리지
+/coverage
+
+# Prisma 참고: /prisma/migrations 는 스키마 이력이라 커밋함 (무시하지 않음)
+# 생성된 Prisma Client 는 node_modules 안이라 위에서 이미 제외됨
+
+# 에디터
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea
+
+# 에이전트 설정 (커밋 제외)
+.claude/
+CLAUDE.md
