@@ -29,28 +29,28 @@ export class StatsController {
   ) {}
 
   // API 인덱스 (사용 가능한 엔드포인트 안내)
-  @Get()
-  index() {
-    return {
-      name: 'two-step-stats-api',
-      description: '농구 동호회 기록지 박스스코어/랭킹 API',
-      endpoints: {
-        'POST /upload?season=&mode=replace|append':
-          '엑셀(.xlsx) 업로드 → 이벤트 적재 (replace=파일에 담긴 경기만 교체, append=증분 추가)',
-        'GET /seasons': '시즌 목록(데이터가 있는 시즌)',
-        'GET /seasons/registry': '등록된 시즌 목록(허용 시즌명 사전)',
-        'POST /seasons': '시즌 등록 { name }',
-        'DELETE /seasons/:id': '시즌 등록 해제(기록은 유지)',
-        'GET /summary?season=': '데이터 요약(규모·코드 사용)',
-        'GET /games?season=': '경기 목록(팀 점수/승패)',
-        'GET /games/:id': '경기 박스스코어(양 팀·선수별)',
-        'GET /players?season=': '선수 목록(출전 수·누적 득점)',
-        'GET /players/:name': '선수 상세(누적 + 경기별 추이)',
-        'GET /leaderboard?metric=pts&limit=20&season=': '지표별 리더보드',
-        'DELETE /data?season=': '데이터 삭제(시즌 지정 없으면 전체)',
-      },
-    };
-  }
+  // @Get()
+  // index() {
+  //   return {
+  //     name: 'two-step-stats-api',
+  //     description: '농구 동호회 기록지 박스스코어/랭킹 API',
+  //     endpoints: {
+  //       'POST /upload?season=&mode=replace|append':
+  //         '엑셀(.xlsx) 업로드 → 이벤트 적재 (replace=파일에 담긴 경기만 교체, append=증분 추가)',
+  //       'GET /seasons': '시즌 목록(데이터가 있는 시즌)',
+  //       'GET /seasons/registry': '등록된 시즌 목록(허용 시즌명 사전)',
+  //       'POST /seasons': '시즌 등록 { name }',
+  //       'DELETE /seasons/:id': '시즌 등록 해제(기록은 유지)',
+  //       'GET /summary?season=': '데이터 요약(규모·코드 사용)',
+  //       'GET /games?season=': '경기 목록(팀 점수/승패)',
+  //       'GET /games/:id': '경기 박스스코어(양 팀·선수별)',
+  //       'GET /players?season=': '선수 목록(출전 수·누적 득점)',
+  //       'GET /players/:name': '선수 상세(누적 + 경기별 추이)',
+  //       'GET /leaderboard?metric=pts&limit=20&season=': '지표별 리더보드',
+  //       'DELETE /data?season=': '데이터 삭제(시즌 지정 없으면 전체)',
+  //     },
+  //   };
+  // }
 
   @Get('health')
   health() {
