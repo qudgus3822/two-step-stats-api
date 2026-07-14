@@ -9,34 +9,42 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-// [변경: 2026-07-14 14:21, 김병현 수정] 시즌 등록부 테이블 추가.
-// 엑셀엔 시즌 컬럼이 없어서 업로드 때 사람이 시즌명을 직접 넣어야 하는데, 자유 입력이면
-// '나이배' / '나이 배' 처럼 오타·표기흔들림이 생긴다. 그래서 '유효한 시즌명'을 여기서 관리하고,
-// 업로드 화면은 이 목록에서 고르게 한다. 집계는 여전히 stat_events.season(문자열)로 하며,
-// 이 테이블은 controlled vocabulary(허용 시즌명 사전) 역할만 한다 — FK 없이 이름으로 연결.
-model Season {
-  id        Int      @id @default(autoincrement())
-  name      String   @unique // 시즌명 (예: 나이배, 25-1시즌). 중복 등록 방지 위해 유니크.
-  createdAt DateTime @default(now())
+// [변경: 2026-07-14 17:32, 김병현 수정] 대회 모델 대개편 — 시즌 문자열 대신 "대회(Competition)"를
+// 진짜 행으로 승격하고, stat_events 가 그 행을 외래키(FK)로 참조하게 바꿨다. (year, seasonNo, name)
+// 조합 유니크는 seasonNo(시즌번호)가 nullable 이라 Postgres NULL-distinct 함정(NULL 은 서로 다른 값
+// 취급)에 걸려 중복을 못 막는다. 그래서 유니크 키를 "결정적으로 계산되는 label 문자열"
+// 하나로 통일했다(항상 non-null → upsert 멱등 보장). 집계는 이제 FK 로 competitions 를 조인해서
+// 라벨을 읽는다(느슨한 문자열 연결이 아니라 진짜 관계).
+model Competition {
+  id        Int         @id @default(autoincrement())
+  year      Int // 연도 (예: 2026)
+  seasonNo  Int? // 시즌번호(선택). NULL 이면 "시즌번호 지정안함"
+  name      String // 대회명 (필수, 예: 나이배)
+  label     String      @unique // 표시 라벨 겸 유니크 키. competitionLabel() 이 만든 값(예: "2026 시즌3 · 나이배")
+  createdAt DateTime    @default(now())
+  events    StatEvent[] // 이 대회에 속한 이벤트들
 
-  @@map("seasons")
+  @@map("competitions")
 }
 
 // 스탯 이벤트: 엑셀 Rawdata 왼쪽 표 한 행 = 한 레코드 (롱 포맷 이벤트 로그)
 // 박스스코어/랭킹 등 모든 파생 스탯은 이 테이블을 집계해서 계산한다.
 model StatEvent {
-  id        Int      @id @default(autoincrement())
-  season    String // 시즌/파일 라벨
-  week      Int // 주차
-  game      Int // 주차 내 경기 번호
-  quarter   Int // 쿼터
-  player    String // 선수 이름
-  stat      String // 스텟 코드 (대문자 정규화)
-  team      String // 팀명
-  createdAt DateTime @default(now())
+  id            Int         @id @default(autoincrement())
+  // [변경: 2026-07-14 17:32, 김병현 수정] season String(느슨한 문자열) → competitionId FK(진짜 관계).
+  // onDelete: Restrict — 경기 기록이 있는 대회는 삭제할 수 없다(고아 이벤트 방지).
+  competitionId Int
+  competition   Competition @relation(fields: [competitionId], references: [id], onDelete: Restrict)
+  week          Int // 주차
+  game          Int // 주차 내 경기 번호
+  quarter       Int // 쿼터
+  player        String // 선수 이름
+  stat          String // 스텟 코드 (대문자 정규화)
+  team          String // 팀명
+  createdAt     DateTime    @default(now())
 
-  @@index([season])
-  @@index([season, week, game])
+  @@index([competitionId])
+  @@index([competitionId, week, game])
   @@index([player])
   @@map("stat_events")
 }

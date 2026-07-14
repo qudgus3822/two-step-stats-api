@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as XLSX from 'xlsx';
-import { StatEvent } from './types';
+import { ParsedEvent } from './types';
 import { KNOWN_CODES, normalizeCode } from './scoring';
 
 // 파싱 중 발견한 경고 (미등록 코드 등). 3년치 파일의 오타를 조기 발견하는 용도.
@@ -11,10 +11,12 @@ export interface ParseWarning {
   message: string;
 }
 
+// [변경: 2026-07-14 17:32, 김병현 수정] 대회 모델 대개편 — 파서는 대회를 모른다.
+// 엑셀엔 대회 칸이 없고, 대회는 업로드 폼(컨트롤러)이 정해서 적재 시점에 붙인다.
+// 그래서 ParseResult 에서 season 필드를 뺐다(옛 season 옵션/파일명 fallback 도 함께 삭제).
 export interface ParseResult {
-  season: string; // 이 파일에서 적재될 시즌 라벨
   sheet: string; // 실제로 읽은 시트 이름
-  events: StatEvent[]; // 정규화된 이벤트 목록
+  events: ParsedEvent[]; // 정규화된 이벤트 목록(대회 없음)
   warnings: ParseWarning[];
   unknownCodes: string[]; // 발견된 미등록 코드 목록(중복 제거)
 }
@@ -37,10 +39,8 @@ export class ParserService {
   private readonly logger = new Logger(ParserService.name);
 
   // 엑셀 버퍼를 파싱해서 정규화된 이벤트로 변환한다.
-  parseWorkbook(
-    buffer: Buffer,
-    opts: { season?: string; filename?: string } = {},
-  ): ParseResult {
+  // [변경: 2026-07-14 17:32, 김병현 수정] opts(season/filename) 제거 — 대회는 컨트롤러가 정한다.
+  parseWorkbook(buffer: Buffer): ParseResult {
     const wb = XLSX.read(buffer, { type: 'buffer' });
     const sheetName = this.pickSheet(wb);
     const ws = wb.Sheets[sheetName];
@@ -61,12 +61,7 @@ export class ParserService {
     }
     const { headerIndex, cols } = detected;
 
-    const season =
-      (opts.season && opts.season.trim()) ||
-      this.seasonFromFilename(opts.filename) ||
-      'default';
-
-    const events: StatEvent[] = [];
+    const events: ParsedEvent[] = [];
     const warnings: ParseWarning[] = [];
     const unknown = new Set<string>();
 
@@ -106,7 +101,8 @@ export class ParserService {
         });
       }
 
-      events.push({ season, week, game, quarter, player, stat, team });
+      // [변경: 2026-07-14 17:32, 김병현 수정] 대회 없는 ParsedEvent 로 push(옛 season 필드 제거).
+      events.push({ week, game, quarter, player, stat, team });
     }
 
     if (warnings.length > 0) {
@@ -114,12 +110,10 @@ export class ParserService {
         `미등록 코드 ${unknown.size}종 / 경고 ${warnings.length}건 (시트: ${sheetName})`,
       );
     }
-    this.logger.log(
-      `파싱 완료: ${events.length}건 이벤트 (시즌: ${season}, 시트: ${sheetName})`,
-    );
+    // [변경: 2026-07-14 17:32, 김병현 수정] 로그 문구에서 시즌 언급 제거(파서는 대회를 모름).
+    this.logger.log(`파싱 완료: ${events.length}건 이벤트 (시트: ${sheetName})`);
 
     return {
-      season,
       sheet: sheetName,
       events,
       warnings,
@@ -190,12 +184,5 @@ export class ParserService {
     if (typeof cell === 'number' && Number.isFinite(cell)) return Math.trunc(cell);
     const m = this.text(cell).match(/-?\d+/);
     return m ? parseInt(m[0], 10) : fallback;
-  }
-
-  // 파일명에서 확장자를 떼어 시즌 라벨로 사용
-  private seasonFromFilename(filename?: string): string | null {
-    if (!filename) return null;
-    const base = filename.replace(/\.[^.]+$/, '').trim();
-    return base || null;
   }
 }

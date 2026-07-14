@@ -6,11 +6,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { boxScoreForGame, gameId, listGames } from '../src/stats/aggregate';
-import { StatEvent } from '../src/stats/types';
+// [변경: 2026-07-14 17:32, 김병현 수정] 대회 모델 대개편 — fixture 이벤트는 이제 대회 없는
+// ParsedEvent 모양이고, 검증 시점에 임의의 competitionId/competitionLabel 을 붙여 StatEvent 로 만든다.
+import { ParsedEvent, StatEvent } from '../src/stats/types';
 
 interface Fixture {
   source: string;
-  events: Omit<StatEvent, 'season'>[];
+  events: ParsedEvent[];
   expectedPlayerGameStats: Record<string, number | null>[];
   expectedGame: {
     week: number;
@@ -19,6 +21,10 @@ interface Fixture {
     winner: string;
   };
 }
+
+// 이 검증 스크립트는 DB 가 없으므로 대회는 고정 상수로 둔다(id=1, 라벨은 표시만 확인).
+const COMPETITION_ID = 1;
+const COMPETITION_LABEL = 'test';
 
 // 기대 컬럼명 → 내부 필드명 매핑
 const FIELD: Record<string, string> = {
@@ -48,8 +54,11 @@ const FIELD: Record<string, string> = {
 function main(): void {
   const fixturePath = path.join(__dirname, 'fixtures', 'real-stats.json');
   const fx: Fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf-8'));
-  const season = fx.source.replace(/\.[^.]+$/, '');
-  const events: StatEvent[] = fx.events.map((e) => ({ ...e, season }));
+  const events: StatEvent[] = fx.events.map((e) => ({
+    ...e,
+    competitionId: COMPETITION_ID,
+    competitionLabel: COMPETITION_LABEL,
+  }));
 
   let failures = 0;
   const fail = (msg: string) => {
@@ -70,7 +79,7 @@ function main(): void {
   }
 
   // 2) 선수별 박스스코어 검증
-  const id = gameId(season, fx.expectedGame.week, fx.expectedGame.game);
+  const id = gameId(COMPETITION_ID, fx.expectedGame.week, fx.expectedGame.game);
   const box = boxScoreForGame(events, id);
   if (!box) {
     fail(`경기 박스스코어를 찾지 못함 (id=${id})`);
