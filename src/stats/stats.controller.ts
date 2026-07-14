@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   Delete,
   Get,
@@ -15,6 +16,8 @@ import { ParserService } from './parser.service';
 import { StoreService } from './store.service';
 import { StatsService } from './stats.service';
 import { LEADERBOARD_METRICS, LeaderboardMetric } from './aggregate';
+// [변경: 2026-07-14 14:21, 김병현 수정] 시즌 등록부 서비스 주입
+import { SeasonService } from './season.service';
 
 @Controller()
 export class StatsController {
@@ -22,6 +25,7 @@ export class StatsController {
     private readonly parser: ParserService,
     private readonly store: StoreService,
     private readonly stats: StatsService,
+    private readonly seasonRegistry: SeasonService,
   ) {}
 
   // API 인덱스 (사용 가능한 엔드포인트 안내)
@@ -31,8 +35,12 @@ export class StatsController {
       name: 'two-step-stats-api',
       description: '농구 동호회 기록지 박스스코어/랭킹 API',
       endpoints: {
-        'POST /upload?season=&mode=replace|append': '엑셀(.xlsx) 업로드 → 이벤트 적재',
-        'GET /seasons': '시즌 목록',
+        'POST /upload?season=&mode=replace|append':
+          '엑셀(.xlsx) 업로드 → 이벤트 적재 (replace=파일에 담긴 경기만 교체, append=증분 추가)',
+        'GET /seasons': '시즌 목록(데이터가 있는 시즌)',
+        'GET /seasons/registry': '등록된 시즌 목록(허용 시즌명 사전)',
+        'POST /seasons': '시즌 등록 { name }',
+        'DELETE /seasons/:id': '시즌 등록 해제(기록은 유지)',
         'GET /summary?season=': '데이터 요약(규모·코드 사용)',
         'GET /games?season=': '경기 목록(팀 점수/승패)',
         'GET /games/:id': '경기 박스스코어(양 팀·선수별)',
@@ -77,10 +85,11 @@ export class StatsController {
       );
     }
 
+    // [변경: 2026-07-14 14:21, 김병현 수정] replace 기본값은 '그 경기만 교체'로 바뀜.
     const useAppend = (mode ?? 'replace').toLowerCase() === 'append';
     const imported = useAppend
       ? await this.store.appendSeason(result.season, result.events)
-      : await this.store.replaceSeason(result.season, result.events);
+      : await this.store.replaceGames(result.season, result.events);
 
     return {
       ok: true,
@@ -96,6 +105,35 @@ export class StatsController {
   @Get('seasons')
   seasons() {
     return this.stats.seasons();
+  }
+
+  // [변경: 2026-07-14 14:21, 김병현 수정] 시즌 등록부 API (업로드 화면의 시즌 선택/등록/삭제).
+  // 위의 GET /seasons 는 '데이터가 있는 시즌'(집계·필터용)이고, 아래는 '등록된 시즌'(허용 목록)이다.
+  // 역할이 달라 경로를 나눴다: /seasons(집계) vs /seasons/registry(등록부).
+  @Get('seasons/registry')
+  seasonList() {
+    return this.seasonRegistry.list();
+  }
+
+  // 시즌 등록 (자유 입력을 정식 시즌명으로 승격). 빈 이름은 거부.
+  @Post('seasons')
+  createSeason(@Body('name') name?: string) {
+    const trimmed = (name ?? '').trim();
+    if (!trimmed) {
+      throw new BadRequestException('시즌명을 입력하세요.');
+    }
+    return this.seasonRegistry.create(trimmed);
+  }
+
+  // 시즌 등록 해제 (경기 기록 stat_events 는 그대로, 허용 목록에서만 제거)
+  @Delete('seasons/:id')
+  async removeSeason(@Param('id') id: string) {
+    const seasonId = parseInt(id, 10);
+    if (!Number.isFinite(seasonId)) {
+      throw new BadRequestException('잘못된 시즌 id 입니다.');
+    }
+    const removed = await this.seasonRegistry.remove(seasonId);
+    return { ok: removed, id: seasonId };
   }
 
   @Get('summary')

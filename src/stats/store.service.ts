@@ -8,10 +8,26 @@ import { StatEvent } from './types';
 export class StoreService {
   constructor(private readonly prisma: PrismaService) {}
 
-  // 특정 시즌의 이벤트를 통째로 교체 (엑셀 재업로드 시 중복 없이 최신화)
-  async replaceSeason(season: string, events: StatEvent[]): Promise<number> {
+  // [변경: 2026-07-14 14:21, 김병현 수정] 시즌 통째 교체 → '파일에 담긴 경기만' 교체.
+  // 엑셀 한 파일 = (시즌, 경기) 단위라, 같은 경기를 다시 올리면 그 경기만 덮어쓴다.
+  // 파일 안에 등장한 (주차, 경기) 조합만 지우고 새로 넣어, 같은 시즌의 다른 경기는 안 건드린다.
+  // (DB 스키마는 그대로 — 삭제 범위만 season → (season, week, game)으로 좁힌 것.)
+  async replaceGames(season: string, events: StatEvent[]): Promise<number> {
+    if (events.length === 0) return 0;
+
+    // 이 파일에 나온 (주차, 경기) 조합만 추린다(보통 한 개). 중복 제거.
+    const seen = new Set<string>();
+    const targets: { week: number; game: number }[] = [];
+    for (const e of events) {
+      const key = `${e.week}|${e.game}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      targets.push({ week: e.week, game: e.game });
+    }
+
+    // season AND (그 파일의 경기들 중 하나)에 해당하는 기존 행만 삭제 후 재적재.
     await this.prisma.$transaction([
-      this.prisma.statEvent.deleteMany({ where: { season } }),
+      this.prisma.statEvent.deleteMany({ where: { season, OR: targets } }),
       this.prisma.statEvent.createMany({ data: events }),
     ]);
     return events.length;

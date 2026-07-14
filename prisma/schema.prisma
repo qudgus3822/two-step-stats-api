@@ -9,6 +9,19 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+// [변경: 2026-07-14 14:21, 김병현 수정] 시즌 등록부 테이블 추가.
+// 엑셀엔 시즌 컬럼이 없어서 업로드 때 사람이 시즌명을 직접 넣어야 하는데, 자유 입력이면
+// '나이배' / '나이 배' 처럼 오타·표기흔들림이 생긴다. 그래서 '유효한 시즌명'을 여기서 관리하고,
+// 업로드 화면은 이 목록에서 고르게 한다. 집계는 여전히 stat_events.season(문자열)로 하며,
+// 이 테이블은 controlled vocabulary(허용 시즌명 사전) 역할만 한다 — FK 없이 이름으로 연결.
+model Season {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique // 시즌명 (예: 나이배, 25-1시즌). 중복 등록 방지 위해 유니크.
+  createdAt DateTime @default(now())
+
+  @@map("seasons")
+}
+
 // 스탯 이벤트: 엑셀 Rawdata 왼쪽 표 한 행 = 한 레코드 (롱 포맷 이벤트 로그)
 // 박스스코어/랭킹 등 모든 파생 스탯은 이 테이블을 집계해서 계산한다.
 model StatEvent {
