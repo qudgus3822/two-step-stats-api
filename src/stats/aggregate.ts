@@ -43,6 +43,13 @@ function pct(makes: number, atts: number): number | null {
   return Math.round((makes / atts) * 1000) / 10;
 }
 
+// [변경: 2026-07-15 11:37, 김병현 수정] 경기당 평균(소수1자리) 단일 출처 헬퍼.
+// leaderboard()·listPlayers() 가 공통으로 쓴다. 반올림 규칙을 한 곳에 가둔다.
+// 주의: 프론트 lib/format.ts 의 perGameAvg 와 반올림 표현식을 반드시 같게 유지할 것(같은 선수 값이 화면마다 갈리지 않게).
+export function perGameAvg(total: number, games: number): number {
+  return games > 0 ? Math.round((total / games) * 10) / 10 : 0;
+}
+
 // 박스스코어에 야투율 등 비율을 붙인다.
 export function withPct(box: BoxScore): BoxScoreView {
   return {
@@ -186,11 +193,13 @@ export function boxScoreForGame(
 }
 
 // 선수 목록 (출전 경기 수·누적 득점 요약)
+// [변경: 2026-07-15 11:37, 김병현 수정] 경기당 득점(ppg) 필드 추가 — 목록의 메인 지표로 승격.
 export function listPlayers(events: StatEvent[]): {
   player: string;
   teams: string[];
   games: number;
   pts: number;
+  ppg: number;
 }[] {
   const map = new Map<
     string,
@@ -212,8 +221,11 @@ export function listPlayers(events: StatEvent[]): {
       teams: [...a.teams],
       games: a.games.size,
       pts: a.pts,
+      // [변경: 2026-07-15 11:37, 김병현 수정] 경기당 득점 계산(공통 헬퍼).
+      ppg: perGameAvg(a.pts, a.games.size),
     }))
-    .sort((a, b) => b.pts - a.pts);
+    // [변경: 2026-07-15 11:37, 김병현 수정] 정렬을 경기당 득점 우선으로. 동률이면 누적 → 이름순.
+    .sort((a, b) => b.ppg - a.ppg || b.pts - a.pts || a.player.localeCompare(b.player));
 }
 
 // 한 선수의 누적 스탯 + 경기별 추이
@@ -333,10 +345,12 @@ export function leaderboard(
         player,
         games,
         total,
-        perGame: games > 0 ? Math.round((total / games) * 10) / 10 : 0,
+        // [변경: 2026-07-15 11:37, 김병현 수정] 인라인 계산 → 공통 헬퍼 perGameAvg 호출로 변경.
+        perGame: perGameAvg(total, games),
       };
     })
-    .sort((a, b) => b.total - a.total || b.perGame - a.perGame)
+    // [변경: 2026-07-15 11:37, 김병현 수정] 정렬을 경기당 평균 우선으로. 동률이면 누적 → 이름순.
+    .sort((a, b) => b.perGame - a.perGame || b.total - a.total || a.player.localeCompare(b.player))
     // [변경: 2026-07-14 17:49, 김병현 수정] limit 양수일 때만 상위 N개로 자르고, 그 외엔 전체 유지.
     .slice(0, limit && limit > 0 ? limit : undefined)
     .map((row, i) => ({ rank: i + 1, ...row }));
