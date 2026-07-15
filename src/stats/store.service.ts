@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { ParsedEvent, StatEvent } from './types';
+// [변경: 2026-07-15 14:10, 김병현 수정] 충돌 감지 응답 타입(GameConflict) 추가.
+import { GameConflict, ParsedEvent, StatEvent } from './types';
 
 // 이벤트 로그의 저장/조회를 담당하는 저장소 (Prisma → Postgres).
 // 집계 로직은 aggregate.ts 의 순수 함수가 담당하고, 여기선 CRUD만 다룬다.
@@ -21,15 +22,8 @@ export class StoreService {
   async replaceGames(competitionId: number, events: ParsedEvent[]): Promise<number> {
     if (events.length === 0) return 0;
 
-    // 이 파일에 나온 (주차, 경기) 조합만 추린다(보통 한 개). 중복 제거.
-    const seen = new Set<string>();
-    const targets: { week: number; game: number }[] = [];
-    for (const e of events) {
-      const key = `${e.week}|${e.game}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      targets.push({ week: e.week, game: e.game });
-    }
+    // [변경: 2026-07-15 14:10, 김병현 수정] 인라인 dedup 를 collectGameKeys 로 추출(findExistingGames 와 공유).
+    const targets = this.collectGameKeys(events);
 
     // competitionId AND (그 파일의 경기들 중 하나)에 해당하는 기존 행만 삭제 후 재적재.
     await this.prisma.$transaction([
@@ -39,6 +33,37 @@ export class StoreService {
       }),
     ]);
     return events.length;
+  }
+
+  // [변경: 2026-07-15 14:10, 김병현 수정] replaceGames 인라인 dedup 를 메서드로 추출(findExistingGames 와 공유).
+  // 이 파일에 나온 (주차, 경기) 조합만 추린다(보통 한 개). 중복 제거.
+  private collectGameKeys(events: ParsedEvent[]): { week: number; game: number }[] {
+    const seen = new Set<string>();
+    const targets: { week: number; game: number }[] = [];
+    for (const e of events) {
+      const key = `${e.week}|${e.game}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      targets.push({ week: e.week, game: e.game });
+    }
+    return targets;
+  }
+
+  // [변경: 2026-07-15 14:10, 김병현 수정] 업로드 파일의 (주차,경기)들 중 이 대회에 이미 있는 것만
+  // 골라 건수와 함께 돌려준다. 쓰기 전에 "덮어쓸지 물어볼" 대상 목록을 만드는 용도.
+  // 겹치는 게 없으면 빈 배열 → 컨트롤러는 그냥 진행한다.
+  async findExistingGames(
+    competitionId: number,
+    events: ParsedEvent[],
+  ): Promise<GameConflict[]> {
+    const targets = this.collectGameKeys(events);
+    if (targets.length === 0) return []; // 빈 파일 등 — 겹칠 게 없다
+    const groups = await this.prisma.statEvent.groupBy({
+      by: ['week', 'game'],
+      where: { competitionId, OR: targets }, // @@index([competitionId,week,game]) 사용
+      _count: true,
+    });
+    return groups.map((g) => ({ week: g.week, game: g.game, existingCount: g._count }));
   }
 
   // 특정 대회에 이벤트를 추가 (증분 적재)

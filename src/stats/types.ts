@@ -67,3 +67,19 @@ export interface GameSummary {
   winner: string | null; // 무승부면 null
   events: number; // 이 경기의 이벤트 수
 }
+
+// [변경: 2026-07-15 14:10, 김병현 수정] 업로드 중복 경기 감지 — 충돌 한 건과 409 응답 모양.
+// 충돌 경기 하나: 파일의 (주차,경기)가 이미 DB에 있고 그 기존 행이 몇 개인지.
+export interface GameConflict {
+  week: number; // 주차
+  game: number; // 주차 내 경기 번호
+  existingCount: number; // 이미 DB에 있는 이 경기의 이벤트 행 수
+}
+// 409 Conflict 응답 body. conflict:true 가 "덮어쓰기 확인용"임을 알리는 판별 필드.
+export interface UploadConflictBody {
+  conflict: true;
+  competitionId: number;
+  competition: string; // 표시 라벨
+  games: GameConflict[];
+  message: string; // 사람이 읽는 안내
+}

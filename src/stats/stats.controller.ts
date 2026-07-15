@@ -72,6 +72,8 @@ export class StatsController {
     @Query('seasonNo') seasonNo?: string,
     @Query('name') name?: string,
     @Query('mode') mode?: string,
+    // [변경: 2026-07-15 14:10, 김병현 수정] 덮어쓰기 확인 후 강행 재전송 시 붙는 플래그.
+    @Query('force') force?: string,
   ) {
     if (!file) {
       throw new BadRequestException(
@@ -110,6 +112,24 @@ export class StatsController {
 
     // [변경: 2026-07-14 14:21, 김병현 수정] replace 기본값은 '그 경기만 교체'로 바뀜.
     const useAppend = (mode ?? 'replace').toLowerCase() === 'append';
+    // [변경: 2026-07-15 14:10, 김병현 수정] replace 인데 force 아니면, 쓰기 전에 중복 경기부터 확인.
+    const useForce = (force ?? '').toLowerCase() === 'true';
+    if (!useAppend && !useForce) {
+      const games = await this.store.findExistingGames(competition.id, parsed.events);
+      if (games.length > 0) {
+        const message =
+          `이미 등록된 경기가 ${games.length}개 있어요. 덮어쓸까요? (` +
+          games.map((g) => `${g.week}주차 ${g.game}경기`).join(', ') +
+          ')';
+        throw new ConflictException({
+          conflict: true,
+          competitionId: competition.id,
+          competition: competition.label,
+          games,
+          message,
+        });
+      }
+    }
     const imported = useAppend
       ? await this.store.appendCompetition(competition.id, parsed.events)
       : await this.store.replaceGames(competition.id, parsed.events);
