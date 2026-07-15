@@ -20,5 +20,11 @@
     "resolveJsonModule": true
   },
   "include": ["src/**/*", "scripts/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "exclude": ["node_modules", "dist"],
+  // [변경: 2026-07-14 22:20, 김병현 수정] ts-node 실행 시 .env 자동 로드 설정 추가.
+  //   ts-node 로 도는 단발 스크립트(import:legacy, check 등)는 NestJS main.ts 를 안 거쳐서
+  //   dotenv 가 로드되지 않아 DATABASE_URL 을 못 읽었다. require 로 프로세스 시작 시 dotenv 를 한 번 주입해 해결.
+  "ts-node": {
+    "require": ["dotenv/config"]
+  }
 }
