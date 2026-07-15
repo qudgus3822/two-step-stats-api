@@ -9,14 +9,20 @@
  *
  * 하는 일: 시트 고르기 → 헤더 키워드로 컬럼 찾기(INDEX 보조컬럼은 무시) →
  * 병합셀 forward-fill → 시즌 경계에서 주차/경기/쿼터 이월 리셋 → 스텟 코드 정규화 →
- * 빈 행 skip. 팀 칸은 원본에 없어서 여기선 안 만든다(적재 때 '-' 주입).
+ * 빈 행 skip.
+ * [변경: 2026-07-15 12:39, 김병현 수정] 원본에 '팀명' 칸이 생겨 team 도 여기서 읽는다.
+ *   앱 파서(parser.service.ts)와 같은 키워드로 잡고 병합셀 forward-fill 한다. 팀명 칸이
+ *   아예 없는 구버전 파일이면 '-' 로 채운다(옛 동작 유지). '팀index'·'주차인덱스' 같은 보조
+ *   컬럼은 index 무시 규칙과 "가장 왼쪽 컬럼 우선"으로 안 걸린다.
  */
 import * as XLSX from 'xlsx';
 import { KNOWN_CODES, normalizeCode } from '../src/stats/scoring';
 
 // 파싱된 한 행 (DB 무관). 연도·시즌은 있고 팀은 없다(팀은 적재 시점에 '-'로 채운다).
+// [변경: 2026-07-15 12:39, 김병현 수정] 원본에 '팀명' 칸이 생겨 team 을 여기서 읽어 담는다
+//   (구버전 파일처럼 팀명 칸이 없으면 리더가 '-' 로 채운다 — 위 옛 설명은 그 fallback 경우만 해당).
 // [주의] app 의 ParsedEvent 를 재사용하지 않는다: ParsedEvent 는 team 이 있고 year/seasonNo 가
-// 없다. 이 리더의 출력은 정반대라 전용 타입이 맞다.
+// 없다. 이 리더의 출력은 team·year·seasonNo 를 모두 담아서 전용 타입이 맞다.
 export interface LegacyRow {
   year: number; // 연도 (예: 2023)
   seasonNo: number; // 시즌번호 (엑셀 '시즌' 칸). competitionId 가 아니다.
@@ -25,6 +31,7 @@ export interface LegacyRow {
   quarter: number; // 쿼터
   player: string; // 선수 이름 (원본 그대로 — '김진우1' 접미사 유지)
   stat: string; // 스텟 코드 (normalizeCode 로 대문자 정규화)
+  team: string; // 팀명 (엑셀 '팀명' 칸. 칸이 없으면 '-'). 앱 파서와 같은 키워드로 읽는다.
 }
 
 // 파싱 중 발견한 경고. 미등록 코드/필수값 미해결 등을 모아 3년치 파일의 오타를 조기 발견한다.
@@ -61,12 +68,25 @@ const HEADER_KEYWORDS: Record<string, string[]> = {
   quarter: ['쿼터', 'quarter'],
   player: ['선수', '이름', 'player'],
   stat: ['스텟', '스탯', '기록', 'stat'],
+  // [변경: 2026-07-15 12:39, 김병현 수정] 팀명 칸 인식 키워드 추가(앱 파서와 동일).
+  // '팀index' 는 matchField 의 index 무시 규칙에 걸려 team 으로 오인되지 않는다.
+  team: ['팀명', '팀', 'team'],
 };
 
-type Field = 'year' | 'seasonNo' | 'week' | 'game' | 'quarter' | 'player' | 'stat';
+type Field =
+  | 'year'
+  | 'seasonNo'
+  | 'week'
+  | 'game'
+  | 'quarter'
+  | 'player'
+  | 'stat'
+  | 'team';
 type ColumnMap = Record<Field, number>;
 
 // 헤더 탐지에 꼭 필요한 7개 필드(하나라도 없으면 행을 온전히 만들 수 없다).
+// [변경: 2026-07-15 12:39, 김병현 수정] team(팀명)은 여기 넣지 않는다 — 구버전 파일 호환을 위해
+//   "선택" 컬럼으로 둔다(있으면 읽고, 없으면 적재 때 '-'). 그래서 팀명 없어도 헤더 탐지는 통과한다.
 const REQUIRED_FIELDS: Field[] = [
   'year',
   'seasonNo',
@@ -103,6 +123,8 @@ export function parseLegacyWorkbook(buffer: Buffer): ParseResult {
   let lastWeek: number | null = null;
   let lastGame: number | null = null;
   let lastQuarter: number | null = null;
+  // [변경: 2026-07-15 12:39, 김병현 수정] 팀명 forward-fill 상태(병합셀 대비). null = 아직 못 봄.
+  let lastTeam: string | null = null;
   let prevKey: string | null = null; // 직전 데이터 행의 `${year}|${seasonNo}` (시즌 경계 감지용)
 
   for (let r = headerIndex + 1; r < grid.length; r++) {
@@ -134,11 +156,14 @@ export function parseLegacyWorkbook(buffer: Buffer): ParseResult {
 
     // (2) 시즌 경계 리셋: (year, seasonNo) 가 직전 데이터 행과 달라지면
     // 주차/경기/쿼터 이월 상태를 버린다(앞 대회 마지막 주차가 다음 대회 첫 행에 새는 것 방지).
+    // [변경: 2026-07-15 12:39, 김병현 수정] 팀명 이월 상태도 함께 버린다(앞 대회 팀명이 다음 대회로
+    //   새는 것 방지 — 팀명은 보통 행마다 있어 무해하지만 병합셀 대비 대칭 처리).
     const key = `${year}|${seasonNo}`;
     if (key !== prevKey) {
       lastWeek = null;
       lastGame = null;
       lastQuarter = null;
+      lastTeam = null;
       prevKey = key;
     }
 
@@ -168,6 +193,19 @@ export function parseLegacyWorkbook(buffer: Buffer): ParseResult {
       quarter = 0;
     }
 
+    // [변경: 2026-07-15 12:39, 김병현 수정] (4.5) 팀명 확정: 병합셀 대비 forward-fill(앱 파서와 동일).
+    // 팀명 칸이 있는데 값이 비면 경고(다른 필드와 대칭) 후 '-'. 칸 자체가 없는 구버전 파일이면
+    // 조용히 '-'(cols.team < 0 이면 경고 안 함 → 매 행 경고로 시끄러워지지 않는다).
+    const teamCell = cols.team >= 0 ? text(row[cols.team]) : '';
+    if (teamCell) lastTeam = teamCell;
+    let team = teamCell || lastTeam || '';
+    if (!team) {
+      if (cols.team >= 0) {
+        warnings.push({ row: r + 1, player, code: '', message: `팀명 미해결 → '-' 처리 (${player}, ${r + 1}행)` });
+      }
+      team = '-';
+    }
+
     // (5) 스텟 코드 정규화 + 미등록 코드 수집(코드는 대문자만, player 는 손대지 않는다).
     const stat = normalizeCode(rawStat);
     if (!KNOWN_CODES.has(stat)) {
@@ -180,7 +218,7 @@ export function parseLegacyWorkbook(buffer: Buffer): ParseResult {
       });
     }
 
-    rows.push({ year, seasonNo, week, game, quarter, player, stat });
+    rows.push({ year, seasonNo, week, game, quarter, player, stat, team });
   }
 
   return { rows, warnings, unknownCodes: [...unknown], sheet: sheetName };
@@ -239,7 +277,12 @@ function detectHeader(grid: unknown[][]): { headerIndex: number; cols: ColumnMap
       if (field && cols[field] === undefined) cols[field] = c;
     }
     const missing = REQUIRED_FIELDS.filter((f) => cols[f] === undefined);
-    if (missing.length === 0) return { headerIndex: r, cols: cols as ColumnMap };
+    if (missing.length === 0) {
+      // [변경: 2026-07-15 12:39, 김병현 수정] team 은 선택 컬럼 — 없으면 -1 로 못박아
+      //   본문에서 `cols.team >= 0` 한 번으로 "칸 유무"를 판별한다(undefined 비교 회피).
+      if (cols.team === undefined) cols.team = -1;
+      return { headerIndex: r, cols: cols as ColumnMap };
+    }
     if (missing.length < bestMissing.length) bestMissing = missing;
   }
   throw new Error(

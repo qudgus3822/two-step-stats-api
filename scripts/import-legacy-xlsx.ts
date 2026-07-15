@@ -11,6 +11,8 @@
  *   `npx prisma generate` 로 client 가 재생성돼 있어야 한다(안 그러면 prisma.competition 타입 없음).
  *
  * 데이터엔 팀·대회명 칸이 없다 → team='-', name='-' 로 채운다(사용자 지정).
+ * [변경: 2026-07-15 12:39, 김병현 수정] 원본에 '팀명' 칸이 생겨 team 은 리더가 그 칸에서 읽어온다
+ *   (r.team). 대회명 칸은 여전히 없어서 name='-' 유지. 팀명 칸 없는 구버전 파일이면 리더가 '-' 로 채운다.
  * 엑셀 '시즌' 칸 → seasonNo, '연도' → year. 라벨은 앱의 competitionLabel() 을 그대로 재사용한다.
  */
 import * as fs from 'fs';
@@ -28,7 +30,8 @@ import {
 import { competitionLabel } from '../src/stats/competition.service';
 
 // 원본에 팀·대회명이 없어서 쓰는 상수. 나중에 실제 값이 생기면 그때 갱신한다.
-const TEAM = '-';
+// [변경: 2026-07-15 12:39, 김병현 수정] 팀명 칸이 생겨 TEAM 상수는 제거했다(리더가 r.team 으로 읽음).
+//   대회명은 여전히 칸이 없어 NAME='-' 만 남긴다.
 const NAME = '-';
 
 // 적재 결과 요약(사람이 눈으로 확인하는 값).
@@ -77,7 +80,8 @@ async function loadIntoDb(
       quarter: r.quarter,
       player: r.player,
       stat: r.stat,
-      team: TEAM,
+      // [변경: 2026-07-15 12:39, 김병현 수정] 하드코딩 '-' 대신 리더가 '팀명' 칸에서 읽은 값 사용.
+      team: r.team,
     }));
 
     // 이 대회의 기존 이벤트를 지우고 새로 넣는다(한 트랜잭션 = 멱등 장치. StatEvent 엔 유니크가 없어
