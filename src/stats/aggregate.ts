@@ -50,6 +50,14 @@ export function perGameAvg(total: number, games: number): number {
   return games > 0 ? Math.round((total / games) * 10) / 10 : 0;
 }
 
+// [변경: 2026-07-15 13:01, 김병현 수정] EFF(효율수치) 단일 출처.
+// 공식: (득점+리바+어시+스틸+블록) − (야투실패) − (자유투실패) − 턴오버.
+// 주의: 프론트 lib/format.ts 의 efficiency 와 식을 반드시 같게 유지(같은 선수 EFF가 화면마다 갈리지 않게).
+export function efficiency(box: BoxScore): number {
+  return (box.pts + box.reb + box.ast + box.stl + box.blk)
+    - (box.fga - box.fgm) - (box.fta - box.ftm) - box.tov;
+}
+
 // 박스스코어에 야투율 등 비율을 붙인다.
 export function withPct(box: BoxScore): BoxScoreView {
   return {
@@ -298,8 +306,10 @@ export function playerDetail(
 }
 
 // 리더보드에서 정렬 가능한 스탯 지표
+// [변경: 2026-07-15 13:01, 김병현 수정] 13종(카운트) → 19종. EFF·성공률 4종·180클럽 추가.
 export const LEADERBOARD_METRICS = [
   'pts',
+  'eff',
   'reb',
   'oreb',
   'dreb',
@@ -312,16 +322,98 @@ export const LEADERBOARD_METRICS = [
   'fg3m',
   'ftm',
   'andOne',
+  'fgPct',
+  'fg2Pct',
+  'fg3Pct',
+  'ftPct',
+  'club180',
 ] as const;
 export type LeaderboardMetric = (typeof LEADERBOARD_METRICS)[number];
 
+// [변경: 2026-07-15 13:01, 김병현 수정] 리더보드 지표를 3계열(카운트/비율/종합비율)로 일반화.
+// 계열별 표시 페이로드(판별 유니온). value = 정렬키 = 차트가 그리는 수.
+type RowBody =
+  | { kind: 'count'; total: number; perGame: number }
+  | { kind: 'rate'; pct: number; makes: number; atts: number }
+  | { kind: 'club180'; sum: number; fgPct: number; fg3Pct: number; ftPct: number };
+export type LeaderboardRow = { rank: number; player: string; games: number; value: number } & RowBody;
+
+// 점수기: 한 선수의 box·games → 정렬/표시값. null 이면 그 보드에서 제외(자격미달·시도0).
+type Scored = { value: number; tiebreak: number; body: RowBody };
+type ScoreFn = (box: BoxScore, games: number) => Scored | null;
+
+// 최소 시도 자격 상수 (성공률/180 왜곡 방지)
+const FT_MIN_ATTEMPTS = 5; // 자유투: 누적 시도 ≥ 5
+const FG3_MIN_ATTEMPTS_PER_GAME = 1; // 3점: 경기당 시도 ≥ 1 (fg3a ≥ games)
+
+// 카운트 계열 점수기 (raw 추출기만 다름). 정렬은 경기당, 동률이면 누적.
+function countScorer(raw: (b: BoxScore) => number): ScoreFn {
+  return (box, games) => {
+    const total = raw(box);
+    // [변경: 2026-07-15 11:37, 김병현 수정] 인라인 계산 → 공통 헬퍼 perGameAvg 호출로 변경.
+    const perGame = perGameAvg(total, games);
+    return { value: perGame, tiebreak: total, body: { kind: 'count', total, perGame } };
+  };
+}
+// 비율 계열 점수기. 시도0/자격미달이면 null. 정렬은 %, 동률이면 시도 많은 순.
+function rateScorer(
+  makes: (b: BoxScore) => number,
+  atts: (b: BoxScore) => number,
+  qualifies: (b: BoxScore, games: number) => boolean,
+): ScoreFn {
+  return (box, games) => {
+    const a = atts(box);
+    if (a <= 0 || !qualifies(box, games)) return null;
+    const p = pct(makes(box), a);
+    if (p == null) return null; // a>0 이라 이론상 non-null이나 방어
+    return { value: p, tiebreak: a, body: { kind: 'rate', pct: p, makes: makes(box), atts: a } };
+  };
+}
+// 180클럽: 3점·자유투 자격 둘 다 충족만. 세 % 합.
+const club180Scorer: ScoreFn = (box, games) => {
+  const fg3ok = box.fg3a >= games * FG3_MIN_ATTEMPTS_PER_GAME;
+  const ftok = box.fta >= FT_MIN_ATTEMPTS;
+  if (!fg3ok || !ftok) return null;
+  const fgP = pct(box.fgm, box.fga);
+  const fg3P = pct(box.fg3m, box.fg3a);
+  const ftP = pct(box.ftm, box.fta);
+  if (fgP == null || fg3P == null || ftP == null) return null;
+  const sum = Math.round((fgP + fg3P + ftP) * 10) / 10;
+  return { value: sum, tiebreak: box.fg3a, body: { kind: 'club180', sum, fgPct: fgP, fg3Pct: fg3P, ftPct: ftP } };
+};
+
+// 지표 → 점수기. 새 지표 추가 = 이 표에 한 줄.
+const SCORERS: Record<LeaderboardMetric, ScoreFn> = {
+  pts: countScorer((b) => b.pts),
+  eff: countScorer((b) => efficiency(b)),
+  reb: countScorer((b) => b.reb),
+  oreb: countScorer((b) => b.oreb),
+  dreb: countScorer((b) => b.dreb),
+  ast: countScorer((b) => b.ast),
+  stl: countScorer((b) => b.stl),
+  blk: countScorer((b) => b.blk),
+  tov: countScorer((b) => b.tov),
+  fgm: countScorer((b) => b.fgm),
+  fg2m: countScorer((b) => b.fg2m),
+  fg3m: countScorer((b) => b.fg3m),
+  ftm: countScorer((b) => b.ftm),
+  andOne: countScorer((b) => b.andOne),
+  fgPct: rateScorer((b) => b.fgm, (b) => b.fga, () => true),
+  fg2Pct: rateScorer((b) => b.fg2m, (b) => b.fg2a, () => true),
+  fg3Pct: rateScorer((b) => b.fg3m, (b) => b.fg3a, (b, g) => b.fg3a >= g * FG3_MIN_ATTEMPTS_PER_GAME),
+  ftPct: rateScorer((b) => b.ftm, (b) => b.fta, (b) => b.fta >= FT_MIN_ATTEMPTS),
+  club180: club180Scorer,
+};
+
 // 특정 지표 기준 리더보드 (누적값 + 경기당 평균)
 // [변경: 2026-07-14 17:49, 김병현 수정] limit 선택적으로 변경 — 생략하거나 0 이하면 상위 제한 없이 전체 반환.
+// [변경: 2026-07-15 13:01, 김병현 수정] 계열(카운트/비율/종합비율)을 모르는 일반 파이프라인으로 재작성.
+// 반환 타입이 LeaderboardRow[](판별 유니온)로 바뀜 — 계산/자격/정렬/랭킹은 SCORERS 뒤에 숨김.
 export function leaderboard(
   events: StatEvent[],
   metric: LeaderboardMetric,
   limit?: number,
-): { rank: number; player: string; games: number; total: number; perGame: number }[] {
+): LeaderboardRow[] {
   const byPlayer = new Map<string, StatEvent[]>();
   const gamesOf = new Map<string, Set<string>>();
   for (const e of events) {
@@ -336,24 +428,23 @@ export function leaderboard(
     g.add(gameKey(e));
   }
 
+  const scorer = SCORERS[metric];
   return [...byPlayer.entries()]
     .map(([player, evs]) => {
       const box = computeBoxScore(evs);
       const games = gamesOf.get(player)?.size ?? 0;
-      const total = box[metric];
-      return {
-        player,
-        games,
-        total,
-        // [변경: 2026-07-15 11:37, 김병현 수정] 인라인 계산 → 공통 헬퍼 perGameAvg 호출로 변경.
-        perGame: perGameAvg(total, games),
-      };
+      const s = scorer(box, games);
+      return s ? { player, games, s } : null;
     })
+    // [변경: 2026-07-15 13:01, 김병현 수정] 자격 미달(null) 선수는 이 보드에서 제외.
+    .filter((x): x is { player: string; games: number; s: Scored } => x !== null)
     // [변경: 2026-07-15 11:37, 김병현 수정] 정렬을 경기당 평균 우선으로. 동률이면 누적 → 이름순.
-    .sort((a, b) => b.perGame - a.perGame || b.total - a.total || a.player.localeCompare(b.player))
+    // (count 계열은 value=경기당·tiebreak=누적이라 이 규칙 그대로 유지됨. 계열 무관 일반화는 아래 새 주석.)
+    // [변경: 2026-07-15 13:01, 김병현 수정] value 내림차순 → 계열별 tiebreak → 이름(결정적).
+    .sort((a, b) => b.s.value - a.s.value || b.s.tiebreak - a.s.tiebreak || a.player.localeCompare(b.player))
     // [변경: 2026-07-14 17:49, 김병현 수정] limit 양수일 때만 상위 N개로 자르고, 그 외엔 전체 유지.
     .slice(0, limit && limit > 0 ? limit : undefined)
-    .map((row, i) => ({ rank: i + 1, ...row }));
+    .map((x, i) => ({ rank: i + 1, player: x.player, games: x.games, value: x.s.value, ...x.s.body }));
 }
 
 // 전체 데이터 요약 (규모 + 코드 사용 히스토그램)
