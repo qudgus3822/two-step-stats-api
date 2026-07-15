@@ -91,13 +91,7 @@ export function parseLegacyWorkbook(buffer: Buffer): ParseResult {
     raw: true,
   });
 
-  const detected = detectHeader(grid);
-  if (!detected) {
-    throw new Error(
-      '헤더(연도/시즌/주차/경기/쿼터/선수/스텟)를 찾지 못했습니다. 시트 구조를 확인해주세요.',
-    );
-  }
-  const { headerIndex, cols } = detected;
+  const { headerIndex, cols } = detectHeader(grid);
 
   const rows: LegacyRow[] = [];
   const warnings: ParseWarning[] = [];
@@ -192,10 +186,9 @@ export function parseLegacyWorkbook(buffer: Buffer): ParseResult {
   return { rows, warnings, unknownCodes: [...unknown], sheet: sheetName };
 }
 
-// 파싱된 행들을 (year, seasonNo) 대회 단위로 묶어 개수만 요약한다(첫 등장 순).
-// distinctGames 는 반드시 (week, game) 쌍으로 센다 — 경기 번호는 주차마다 1부터 다시
-// 시작하므로 Set(game) 으로 세면 서로 다른 경기가 뭉쳐서 과소 집계된다.
-export function summarizeRows(rows: LegacyRow[]): CompetitionSummary[] {
+// 파싱된 행들을 (year, seasonNo) 대회 단위로 묶는다(첫 등장 순). 요약·적재가 같은 그룹핑을
+// 쓰도록 여기 한 곳에만 둔다(DRY — 적재 스크립트가 이 함수를 재사용한다).
+export function groupByCompetition(rows: LegacyRow[]): Map<string, LegacyRow[]> {
   const groups = new Map<string, LegacyRow[]>();
   for (const r of rows) {
     const key = `${r.year}|${r.seasonNo}`;
@@ -203,7 +196,14 @@ export function summarizeRows(rows: LegacyRow[]): CompetitionSummary[] {
     if (bucket) bucket.push(r);
     else groups.set(key, [r]);
   }
-  return [...groups.values()].map((groupRows) => {
+  return groups;
+}
+
+// 파싱된 행들을 대회 단위로 묶어 개수만 요약한다.
+// distinctGames 는 반드시 (week, game) 쌍으로 센다 — 경기 번호는 주차마다 1부터 다시
+// 시작하므로 Set(game) 으로 세면 서로 다른 경기가 뭉쳐서 과소 집계된다.
+export function summarizeRows(rows: LegacyRow[]): CompetitionSummary[] {
+  return [...groupByCompetition(rows).values()].map((groupRows) => {
     const { year, seasonNo } = groupRows[0];
     const weeks = new Set(groupRows.map((r) => r.week));
     const games = new Set(groupRows.map((r) => `${r.week}|${r.game}`));
@@ -226,10 +226,10 @@ function pickSheet(wb: XLSX.WorkBook): string {
 }
 
 // 헤더 행 탐지: 앞쪽 행들을 위→아래로 훑어, 7개 필드가 모두 매칭되는 "첫" 행을 헤더로 본다.
-function detectHeader(
-  grid: unknown[][],
-): { headerIndex: number; cols: ColumnMap } | null {
+// 못 찾으면, 그나마 가장 헤더에 가까웠던 후보 행 기준으로 "못 찾은 컬럼"을 콕 집어 에러를 던진다.
+function detectHeader(grid: unknown[][]): { headerIndex: number; cols: ColumnMap } {
   const scanLimit = Math.min(grid.length, 30);
+  let bestMissing: Field[] = [...REQUIRED_FIELDS]; // 미매칭이 가장 적었던(=가장 헤더 같던) 후보
   for (let r = 0; r < scanLimit; r++) {
     const row = grid[r] ?? [];
     const cols: Partial<ColumnMap> = {};
@@ -238,11 +238,14 @@ function detectHeader(
       // 같은 필드가 여러 컬럼에 걸리면 가장 왼쪽(먼저 만난) 컬럼만 사용.
       if (field && cols[field] === undefined) cols[field] = c;
     }
-    if (REQUIRED_FIELDS.every((f) => cols[f] !== undefined)) {
-      return { headerIndex: r, cols: cols as ColumnMap };
-    }
+    const missing = REQUIRED_FIELDS.filter((f) => cols[f] === undefined);
+    if (missing.length === 0) return { headerIndex: r, cols: cols as ColumnMap };
+    if (missing.length < bestMissing.length) bestMissing = missing;
   }
-  return null;
+  throw new Error(
+    `헤더를 찾지 못했습니다. 못 찾은 컬럼: ${bestMissing.join('/')} ` +
+      '(연도/시즌/주차/경기/쿼터/선수/스텟 헤더가 한 행에 모두 있어야 합니다).',
+  );
 }
 
 // 셀 텍스트가 어떤 필드 헤더인지 판별. 'index' 가 들어간 헤더(INDEX/시즌index 보조컬럼)는

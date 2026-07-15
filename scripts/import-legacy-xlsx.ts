@@ -18,6 +18,7 @@ import { PrismaClient } from '@prisma/client';
 import {
   parseLegacyWorkbook,
   summarizeRows,
+  groupByCompetition,
   ParseResult,
 } from './legacyXlsxReader';
 // 앱의 정본 라벨 규칙을 재사용한다 → 업로드 화면이 만드는 라벨과 import 가 만드는 라벨이 문자까지
@@ -51,14 +52,8 @@ async function loadIntoDb(
   prisma: PrismaClient,
   result: ParseResult,
 ): Promise<LoadSummary> {
-  // (year, seasonNo) 로 그룹핑(대회 단위).
-  const groups = new Map<string, ParseResult['rows']>();
-  for (const r of result.rows) {
-    const key = `${r.year}|${r.seasonNo}`;
-    const bucket = groups.get(key);
-    if (bucket) bucket.push(r);
-    else groups.set(key, [r]);
-  }
+  // (year, seasonNo) 로 그룹핑(대회 단위) — 리더의 그룹핑 함수를 재사용(요약과 동일 기준).
+  const groups = groupByCompetition(result.rows);
 
   const competitions: LoadSummary['competitions'] = [];
   let totalInserted = 0;
