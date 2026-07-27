@@ -47,7 +47,7 @@ export class StatsController {
   //       'GET /games?competitionId=': '경기 목록(팀 점수/승패)',
   //       'GET /games/:id': '경기 박스스코어(양 팀·선수별)',
   //       'GET /players?competitionId=': '선수 목록(출전 수·누적 득점)',
-  //       'GET /players/:name': '선수 상세(누적 + 경기별 추이)',
+  //       'GET /players/:name?competitionId=': '선수 상세(누적 + 경기별 추이)',
   //       'GET /leaderboard?metric=pts&limit=20&competitionId=': '지표별 리더보드',
   //       'DELETE /data?competitionId=': '데이터 삭제(대회 지정 없으면 전체)',
   //     },
@@ -229,9 +229,13 @@ export class StatsController {
     return this.stats.players(this.parseCompetitionId(competitionId));
   }
 
+  // [변경: 2026-07-27 15:00, 김병현 수정] 대회 필터 추가(/players, /leaderboard 와 같은 패턴).
   @Get('players/:name')
-  async player(@Param('name') name: string) {
-    const detail = await this.stats.player(name);
+  async player(
+    @Param('name') name: string,
+    @Query('competitionId') competitionId?: string,
+  ) {
+    const detail = await this.stats.player(name, this.parseCompetitionId(competitionId));
     if (!detail) throw new NotFoundException(`선수를 찾을 수 없습니다: ${name}`);
     return detail;
   }

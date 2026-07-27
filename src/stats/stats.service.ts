@@ -32,8 +32,11 @@ export class StatsService {
     return listPlayers(events);
   }
 
-  async player(name: string) {
-    const events = await this.store.getEvents();
+  // [변경: 2026-07-27 15:00, 김병현 수정] 선수 상세도 대회 필터를 받는다.
+  // 다른 조회들과 같은 규칙 — competitionId 없으면 통산(전체 대회).
+  // 필터는 여기(저장소 호출)에서만 건다. 집계 함수 playerDetail 은 순수하게 둔다.
+  async player(name: string, competitionId?: number) {
+    const events = await this.store.getEvents({ competitionId });
     return playerDetail(events, name);
   }
 
