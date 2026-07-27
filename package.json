@@ -16,6 +16,7 @@
     "check": "ts-node scripts/check-pipeline.ts",
     "check:legacy": "ts-node scripts/check-legacy-import.ts",
     "check:player": "ts-node scripts/check-player-scope.ts",
+    "check:synergy": "ts-node scripts/check-synergy.ts",
     "import:legacy": "ts-node scripts/import-legacy-xlsx.ts",
     "postinstall": "prisma generate"
   },

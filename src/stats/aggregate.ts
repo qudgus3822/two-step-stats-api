@@ -17,7 +17,9 @@ import {
 // 이렇게 분리하면 대회 표기 규칙이 바뀌어도 집계 로직은 안 건드려도 된다.
 
 // 경기 그룹핑 키 (대회id|주차|경기). 널 문자로 구분해 충돌을 피한다.
-function gameKey(e: Pick<StatEvent, 'competitionId' | 'week' | 'game'>): string {
+// [변경: 2026-07-27 16:14, 김병현 수정] synergy.ts 가 "무엇이 한 경기인가"를 같은 규칙으로 써야 해서 export 로 공개.
+// (로직은 그대로 — 지식의 단일 출처를 유지하려는 목적. 참고: 실제 구분자는 공백이다.)
+export function gameKey(e: Pick<StatEvent, 'competitionId' | 'week' | 'game'>): string {
   return `${e.competitionId} ${e.week} ${e.game}`;
 }
 

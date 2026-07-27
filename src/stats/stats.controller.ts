@@ -17,6 +17,8 @@ import { ParserService } from './parser.service';
 import { StoreService } from './store.service';
 import { StatsService } from './stats.service';
 import { LEADERBOARD_METRICS, LeaderboardMetric } from './aggregate';
+// [변경: 2026-07-27 16:14, 김병현 수정] 시너지 탭용 지표 목록·타입 추가.
+import { SYNERGY_METRICS, SynergyMetric } from './synergy';
 // [변경: 2026-07-14 17:32, 김병현 수정] 대회 등록부 서비스 주입 (season.service → competition.service 리네임)
 import { CompetitionService } from './competition.service';
 
@@ -256,6 +258,26 @@ export class StatsController {
     const parsed = limit ? parseInt(limit, 10) : NaN;
     const n = Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
     return this.stats.leaderboard(m, n, this.parseCompetitionId(competitionId));
+  }
+
+  // [변경: 2026-07-27 16:14, 김병현 수정] 시너지 탭용 — 기준 선수 하나에 대한 동료별 WOWY 리포트.
+  // player 는 필수(빈 값이면 400), metric 기본값은 eff. 기록이 없는 이름은 404가 아니라 빈 리포트다
+  // (이름이 경로가 아니라 '필터'라서 — /players?competitionId= 가 빈 배열을 주는 것과 같은 결).
+  @Get('synergy')
+  synergy(
+    @Query('player') player?: string,
+    @Query('metric') metric?: string,
+    @Query('competitionId') competitionId?: string,
+  ) {
+    const name = (player ?? '').trim();
+    if (!name) throw new BadRequestException('기준 선수(player)를 지정하세요.');
+    const m = (metric ?? 'eff') as SynergyMetric;
+    if (!SYNERGY_METRICS.includes(m)) {
+      throw new BadRequestException(
+        `지원하지 않는 지표입니다. 사용 가능: ${SYNERGY_METRICS.join(', ')}`,
+      );
+    }
+    return this.stats.synergy(name, m, this.parseCompetitionId(competitionId));
   }
 
   @Delete('data')

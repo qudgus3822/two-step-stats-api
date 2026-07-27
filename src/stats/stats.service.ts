@@ -9,6 +9,8 @@ import {
   playerDetail,
   summary,
 } from './aggregate';
+// [변경: 2026-07-27 16:14, 김병현 수정] 시너지 탭용 순수 리포트 함수 + 지표 타입 추가.
+import { synergyReport, SynergyMetric } from './synergy';
 
 // 저장소에서 이벤트를 읽어와 순수 집계 함수에 위임하는 얇은 서비스.
 // [변경: 2026-07-14 17:32, 김병현 수정] 대회 모델 대개편 — season?: string → competitionId?: number.
@@ -49,5 +51,11 @@ export class StatsService {
   async summary(competitionId?: number) {
     const events = await this.store.getEvents({ competitionId });
     return summary(events);
+  }
+
+  // [변경: 2026-07-27 16:14, 김병현 수정] 시너지 리포트 위임 추가(형제 메서드와 같은 모양).
+  async synergy(player: string, metric: SynergyMetric, competitionId?: number) {
+    const events = await this.store.getEvents({ competitionId });
+    return synergyReport(events, player, metric);
   }
 }
