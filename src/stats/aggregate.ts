@@ -235,7 +235,10 @@ export function listPlayers(events: StatEvent[]): {
       ppg: perGameAvg(a.pts, a.games.size),
     }))
     // [변경: 2026-07-15 11:37, 김병현 수정] 정렬을 경기당 득점 우선으로. 동률이면 누적 → 이름순.
-    .sort((a, b) => b.ppg - a.ppg || b.pts - a.pts || a.player.localeCompare(b.player));
+    // [변경: 2026-07-28 15:44, 김병현 수정] 정렬을 이름 가나다순으로 변경.
+    // 위 map 이 선수 이름을 키로 묶어서 이름은 항상 유일하다 → 동률이 없으니 보조 기준이 필요 없다.
+    // 'ko' 를 명시하는 이유: 로케일을 안 주면 서버 환경 설정에 따라 한글 순서가 흔들릴 수 있다.
+    .sort((a, b) => a.player.localeCompare(b.player, 'ko'));
 }
 
 // 한 선수의 누적 스탯 + 경기별 추이
