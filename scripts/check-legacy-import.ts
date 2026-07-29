@@ -58,6 +58,7 @@ function main(): void {
     year: 2023, seasonNo: 1, week: 1, game: 1, quarter: 1, player: '김진우1', stat: 'DR',
   }));
 
+  // [변경: 2026-07-29 21:45, 김병현 수정] 이제 정확히는 '공백만 빼고 원본 유지'다(§4-3 ii). 단언 값 '김진우1' 엔 공백이 없어 결과는 그대로 통과한다.
   // 4) player 접미사 유지 (절삭 금지)
   eq('player 원본 유지', res.rows[0]?.player, '김진우1');
 

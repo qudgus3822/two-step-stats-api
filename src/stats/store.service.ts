@@ -98,6 +98,22 @@ export class StoreService {
     return groups.map((g) => ({ week: g.week, game: g.game, existingCount: g._count }));
   }
 
+  // [신설: 2026-07-29 22:00, 김병현 작성] 여태 기록이 남은 선수 이름 전부(중복 없이, 전체 대회).
+  //
+  // 왜 getEvents() 를 안 쓰나: 그건 이벤트 수만 건을 통째로 읽어 캐시에 얹는다. 여기 필요한 건
+  // 이름 목록뿐인데다, 업로드가 성공하면 곧바로 그 캐시를 버린다 — 채우자마자 버리는 헛일이 된다.
+  // groupBy 는 DB 안에서 GROUP BY 로 처리돼, 네트워크로 넘어오는 건 이름 목록뿐이다
+  // (@@index([player]) 를 탄다).
+  //
+  // 캐시를 안 붙이는 이유: 이 쿼리는 '업로드 확인'에서만 돈다 — 하루에 몇 번이다. 캐시를 붙이면
+  // 무효화 배선(업로드/삭제/수동 refresh)이 하나 더 늘어나는데, 얻는 게 사실상 없다.
+  //
+  // 실패하면 그냥 던진다 — 이게 '실패해도 되는 질문'인지는 부르는 쪽 상황이 정한다(컨트롤러가 흡수).
+  async listKnownPlayerNames(): Promise<string[]> {
+    const groups = await this.prisma.statEvent.groupBy({ by: ['player'] });
+    return groups.map((g) => g.player);
+  }
+
   // 특정 대회에 이벤트를 추가 (증분 적재)
   // [변경: 2026-07-14 17:32, 김병현 수정] appendSeason → appendCompetition, competitionId 기준.
   async appendCompetition(competitionId: number, events: ParsedEvent[]): Promise<number> {

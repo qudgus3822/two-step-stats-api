@@ -8,6 +8,8 @@ import { PrismaClient } from '@prisma/client';
 // [변경: 2026-07-14 17:32, 김병현 수정] 대회 모델 대개편 — Competition 을 upsert 해서 얻은 id 로
 // 이벤트를 적재한다. 라벨 규칙은 competition.service.competitionLabel() 한 곳만 쓴다(중복 정의 방지).
 import { competitionLabel } from '../src/stats/competition.service';
+// [신설: 2026-07-29 21:50, 김병현 작성] 앱 파서와 같은 선수 이름 공백 제거 규칙을 재사용한다.
+import { normalizePlayerName } from '../src/stats/playerCheck';
 
 async function main(): Promise<void> {
   const prisma = new PrismaClient();
@@ -39,7 +41,8 @@ async function main(): Promise<void> {
       week: e.week,
       game: e.game,
       quarter: e.quarter,
-      player: e.player,
+      // [변경: 2026-07-29 21:50, 김병현 수정] 앱 파서와 같은 규칙으로 이름 공백 제거(픽스처가 없어 실행 검증은 불가 — G13).
+      player: normalizePlayerName(e.player),
       stat: e.stat,
       team: e.team,
     }),

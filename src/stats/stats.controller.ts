@@ -5,6 +5,7 @@ import {
   Controller,
   Delete,
   Get,
+  Logger,
   NotFoundException,
   Param,
   Post,
@@ -23,9 +24,15 @@ import { SYNERGY_METRICS, SynergyMetric } from './synergy';
 import { GROWTH_METRICS, GrowthMetric } from './growth';
 // [변경: 2026-07-14 17:32, 김병현 수정] 대회 등록부 서비스 주입 (season.service → competition.service 리네임)
 import { CompetitionService } from './competition.service';
+// [신설: 2026-07-29 22:05, 김병현 작성] 처음 보는 선수 이름 판정(순수 모듈).
+import { findNewPlayers } from './playerCheck';
+import { GameConflict, NewPlayer, UploadConflictBody } from './types';
 
 @Controller()
 export class StatsController {
+  // [신설: 2026-07-29 22:05, 김병현 작성] 이름 조회 실패를 '조용히 넘기되 흔적은 남기려고' 쓴다.
+  private readonly logger = new Logger(StatsController.name);
+
   constructor(
     private readonly parser: ParserService,
     private readonly store: StoreService,
@@ -117,21 +124,47 @@ export class StatsController {
     // [변경: 2026-07-14 14:21, 김병현 수정] replace 기본값은 '그 경기만 교체'로 바뀜.
     const useAppend = (mode ?? 'replace').toLowerCase() === 'append';
     // [변경: 2026-07-15 14:10, 김병현 수정] replace 인데 force 아니면, 쓰기 전에 중복 경기부터 확인.
+    // [변경: 2026-07-29 22:05, 김병현 수정] 위 줄은 옛 동작 설명이다 —
+    // 아래 관문 통합으로 조건이 '!useForce' 하나로 넓어졌고, 보는 것도 중복 경기 + 처음 보는 이름 둘이다.
     const useForce = (force ?? '').toLowerCase() === 'true';
-    if (!useAppend && !useForce) {
-      const games = await this.store.findExistingGames(competition.id, parsed.events);
-      if (games.length > 0) {
-        const message =
-          `이미 등록된 경기가 ${games.length}개 있어요. 덮어쓸까요? (` +
-          games.map((g) => `${g.week}주차 ${g.game}경기`).join(', ') +
-          ')';
+    // [변경: 2026-07-29 22:05, 김병현 수정] 확인 관문을 '하나'로 합친다.
+    //  - 겹친 경기 검사: 예전 그대로 replace 일 때만 (append 는 덮어쓰는 게 아니라 물을 게 없다)
+    //  - 처음 보는 이름 검사: mode 와 무관하게 항상 (append 로도 오타는 똑같이 들어간다)
+    // 둘 중 하나라도 걸리면 409 를 '한 번' 던진다. 그래야 사용자가 모달을 두 번 보지 않는다.
+    // force=true 는 이 관문 전체를 건너뛴다 = 사용자가 둘 다 확인했다는 뜻.
+    if (!useForce) {
+      // 두 조회는 서로를 안 기다려도 된다. DB 가 원격(Supabase)이라 왕복 한 번이 아깝다.
+      //
+      // [신설: 2026-07-29 22:05, 김병현 작성] ⚠ 두 쿼리의 '실패 정책'이 다르다.
+      //  - 겹친 경기 조회가 실패하면 → 그대로 터뜨린다(500). 못 물어보고 저장하면 덮어쓰기 사고가 난다.
+      //  - 이름 조회가 실패하면 → 삼킨다. 이 검사는 '차단'이 아니라 '확인'이다. 보조 질문 하나가
+      //    실패했다고 사용자의 저장을 통째로 막으면, 얻는 것(오타 알림) 없이 잃는 것(업로드 실패)만 남는다.
+      // null = "못 물어봤다". 빈 배열 = "정말 아무도 없다"(첫 업로드) 와 반드시 구분한다
+      //   — 나중에 "이번엔 이름 확인을 못 했어요" 배너를 붙이려면 이 구분이 있어야 한다.
+      const [games, knownPlayerNames] = await Promise.all([
+        useAppend
+          ? Promise.resolve<GameConflict[]>([])
+          : this.store.findExistingGames(competition.id, parsed.events),
+        this.store.listKnownPlayerNames().catch((err: unknown) => {
+          this.logger.warn(
+            `선수 이름 목록 조회 실패 — 이름 확인을 건너뜁니다: ${(err as Error).message}`,
+          );
+          return null;
+        }),
+      ]);
+      const newPlayers: NewPlayer[] = knownPlayerNames
+        ? findNewPlayers(parsed.events.map((e) => e.player), knownPlayerNames)
+        : [];
+      if (games.length > 0 || newPlayers.length > 0) {
+        // satisfies 로 응답 모양을 계약(UploadConflictBody)에 묶는다 — 필드를 빠뜨리면 컴파일이 막는다.
         throw new ConflictException({
           conflict: true,
           competitionId: competition.id,
           competition: competition.label,
           games,
-          message,
-        });
+          newPlayers,
+          message: this.uploadConflictMessage(games, newPlayers),
+        } satisfies UploadConflictBody);
       }
     }
     const imported = useAppend
@@ -202,6 +235,26 @@ export class StatsController {
           '이 대회엔 경기 기록이 있어 등록 해제할 수 없어요. 먼저 데이터를 지우세요.',
         );
     }
+  }
+
+  // [신설: 2026-07-29 22:05, 김병현 작성] 409 본문의 사람이 읽는 한 줄.
+  // 화면(모달)은 games/newPlayers 배열을 보고 제 문구를 직접 만든다 — 이 문자열은 API 를 직접
+  // 두드리는 사람과 로그를 위한 것이다.
+  // 이름을 나열하지 않고 '개수만' 쓰는 이유: 이름은 어차피 newPlayers 배열에 다 들어 있다.
+  // 여기서 또 잘라 쓰면 '몇 명까지 보여줄까' 규칙이 서버와 모달 두 곳에 서로 다른 값으로 생긴다.
+  private uploadConflictMessage(games: GameConflict[], newPlayers: NewPlayer[]): string {
+    const parts: string[] = [];
+    if (games.length > 0) {
+      parts.push(
+        `이미 등록된 경기가 ${games.length}개 있어요 (` +
+          games.map((g) => `${g.week}주차 ${g.game}경기`).join(', ') +
+          ')',
+      );
+    }
+    if (newPlayers.length > 0) {
+      parts.push(`처음 보는 선수 이름이 ${newPlayers.length}명 있어요`);
+    }
+    return `${parts.join(' · ')}. 이대로 진행할까요?`;
   }
 
   // 쿼리 문자열 → 필터용 competitionId. 정수(1 이상)일 때만 필터, 그 외(0/음수/NaN/빈값)는 전체.

@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as XLSX from 'xlsx';
 import { ParsedEvent } from './types';
 import { KNOWN_CODES, normalizeCode } from './scoring';
+// [신설: 2026-07-29 21:35, 김병현 작성] 선수 이름 공백 제거 규칙(playerCheck.ts 가 유일한 출처).
+import { normalizePlayerName } from './playerCheck';
 
 // 파싱 중 발견한 경고 (미등록 코드 등). 3년치 파일의 오타를 조기 발견하는 용도.
 export interface ParseWarning {
@@ -73,7 +75,9 @@ export class ParserService {
 
     for (let r = headerIndex + 1; r < rows.length; r++) {
       const row = rows[r] ?? [];
-      const player = this.text(row[cols.player]);
+      // [변경: 2026-07-29 21:35, 김병현 수정] 선수 이름은 공백을 지우고 저장한다.
+      // '김 병현'과 '김병현'이 따로 저장되면 같은 사람이 두 명으로 집계된다(규칙: playerCheck.ts).
+      const player = normalizePlayerName(this.text(row[cols.player]));
       const rawStat = this.text(row[cols.stat]);
 
       // 주차/경기/쿼터/팀명 값 확정 (빈 칸이면 직전 값 유지)
