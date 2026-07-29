@@ -19,6 +19,8 @@ import { StatsService } from './stats.service';
 import { LEADERBOARD_METRICS, LeaderboardMetric } from './aggregate';
 // [변경: 2026-07-27 16:14, 김병현 수정] 시너지 탭용 지표 목록·타입 추가.
 import { SYNERGY_METRICS, SynergyMetric } from './synergy';
+// [변경: 2026-07-28 15:00, 김병현 수정] 기량 발전 탭용 지표 목록·타입 추가.
+import { GROWTH_METRICS, GrowthMetric } from './growth';
 // [변경: 2026-07-14 17:32, 김병현 수정] 대회 등록부 서비스 주입 (season.service → competition.service 리네임)
 import { CompetitionService } from './competition.service';
 
@@ -278,6 +280,27 @@ export class StatsController {
       );
     }
     return this.stats.synergy(name, m, this.parseCompetitionId(competitionId));
+  }
+
+  // [변경: 2026-07-28 15:00, 김병현 수정] 기량 발전 탭 — 고른 대회와 그 직전 대회를 비교한 리포트.
+  // competitionId 는 '필터'가 아니라 '지목'이라 필수(없으면 400)이고, 없는 대회면 404 다.
+  // (다른 조회에서 competitionId 생략 = 전체 대회지만, 여기선 전체 대회에 직전 시즌이 정의되지 않는다.)
+  @Get('growth')
+  async growth(
+    @Query('competitionId') competitionId?: string,
+    @Query('metric') metric?: string,
+  ) {
+    const cid = this.parseCompetitionId(competitionId);
+    if (cid == null) throw new BadRequestException('대회(competitionId)를 지정하세요.');
+    const m = (metric ?? 'eff') as GrowthMetric;
+    if (!GROWTH_METRICS.includes(m)) {
+      throw new BadRequestException(
+        `지원하지 않는 지표입니다. 사용 가능: ${GROWTH_METRICS.join(', ')}`,
+      );
+    }
+    const report = await this.stats.growth(cid, m);
+    if (!report) throw new NotFoundException(`대회를 찾을 수 없습니다: ${cid}`);
+    return report;
   }
 
   @Delete('data')

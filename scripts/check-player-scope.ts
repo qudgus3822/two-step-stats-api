@@ -76,7 +76,12 @@ async function main(): Promise<void> {
   };
 
   const store = new RecordingStore(EVENTS);
-  const service = new StatsService(store as unknown as StoreService);
+  // [변경: 2026-07-28 16:00, 김병현 수정] 기량 발전 탭 추가로 StatsService 생성자가 2인자가 됐다
+  // (CompetitionService 주입). 이 검사는 선수 상세 배선만 보고 대회 등록부는 안 쓰므로 빈 스텁으로 채운다.
+  const service = new StatsService(
+    store as unknown as StoreService,
+    { list: async () => [] } as unknown as CompetitionService,
+  );
 
   // 1) 대회1 스코프 — 필터·합계·경기 수·상대 점수까지 확인.
   {
