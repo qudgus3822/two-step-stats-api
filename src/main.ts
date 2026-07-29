@@ -11,7 +11,7 @@ async function bootstrap(): Promise<void> {
   app.setGlobalPrefix('api');
   // 프론트(SvelteKit 대시보드 등)에서 브라우저로 직접 호출할 수 있도록 CORS 허용
   app.enableCors();
-  const port = process.env.PORT ? Number(process.env.PORT) : 3000;
+  const port = process.env.PORT ? Number(process.env.PORT) : 13000;
   await app.listen(port);
   new Logger('Bootstrap').log(`투스텝 기록 API 서버 실행: http://localhost:${port}`);
 }

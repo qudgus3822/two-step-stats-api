@@ -303,6 +303,21 @@ export class StatsController {
     return report;
   }
 
+  // [신설: 2026-07-29 11:10, 김병현 작성] 이벤트 캐시 수동 비우기.
+  //
+  // 캐시는 TTL 이 없다 — 이 서버를 거친 쓰기(업로드/삭제)에서만 스스로 버린다. 그래서
+  // 서버를 안 거치고 DB 를 바꾸면(scripts/seed.ts, scripts/import-legacy-xlsx.ts,
+  // Supabase 콘솔 직접 수정) 캐시가 영영 낡은 채로 남는다. 그때 쓰는 탈출구다.
+  // 서버 재시작으로도 같은 효과가 나지만, 재시작 없이 처리하려고 둔다.
+  //
+  // 인증은 없다 — 기존 DELETE /data 와 같은 수준이다(그쪽이 훨씬 위험한데도 열려 있다).
+  // 하는 일은 "다음 요청 때 DB 를 한 번 더 읽어라"뿐이라, 눌려도 잠깐 느려질 뿐 데이터는 안전하다.
+  @Post('cache/refresh')
+  refreshCache() {
+    this.store.invalidateAll();
+    return { ok: true };
+  }
+
   @Delete('data')
   async clear(@Query('competitionId') competitionId?: string) {
     const cid = this.parseCompetitionId(competitionId);
