@@ -1,5 +1,5 @@
 /**
- * [신설: 2026-07-29 21:55, 김병현 작성] "이미 저장된 이름 중 공백 든 것을 새 규칙에 맞춘다" — 옛 데이터 일회성 정리.
+ * [신설: 2026-07-29 15:30, 김병현 작성] "이미 저장된 이름 중 공백 든 것을 새 규칙에 맞춘다" — 옛 데이터 일회성 정리.
  *
  * 왜 필요한가: 새 업로드만 정규화하면 '김 병현'(옛 행)과 '김병현'(새 행)이 영원히 두 사람으로 남는다.
  * 정규화의 효과가 절반만 난다.
@@ -26,7 +26,18 @@ import { normalizePlayerName } from '../src/stats/playerCheck'; // 규칙은 절
 const apply = process.argv.includes('--apply'); // 없으면 미리보기(dry-run)
 const prisma = new PrismaClient();
 
+// [신설: 2026-07-29 16:05, 김병현 작성] DB 연결을 여는 스크립트라 try/finally 로 감싼다
+// (import-legacy-xlsx.ts:176~180 과 같은 관례). 중간에 예외가 나도 $disconnect() 가 반드시 불려야
+// 커넥션이 안 새고, 실행한 프로세스가 열린 소켓 때문에 안 끝나고 매달리는 것도 막는다.
 async function main(): Promise<void> {
+  try {
+    await run();
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+async function run(): Promise<void> {
   // 1) 이름과 행 수를 한 번에 읽는다
   const groups = await prisma.statEvent.groupBy({ by: ['player'], _count: true });
   // 이름 → 행수 표. "새 이름이 이미 DB 에 있나"를 여기서 공짜로 알 수 있다.
@@ -82,17 +93,24 @@ async function main(): Promise<void> {
     console.log(`⚠ 건너뜀(빈 이름이 됨): ${JSON.stringify(t.from)}(${t.rows}행)`);
   }
 
+  // [변경: 2026-07-29 16:05, 김병현 수정] 요약 숫자와 화면 줄 수가 어긋나던 것을 고친다.
+  // merges.length 는 '옛 이름'(출발지) 개수, mergeGroups.size 는 위에서 실제로 찍힌 '⚠ 합침'
+  // 줄 수(도착지 기준으로 묶은 것)다 — 둘은 같은 게 아니다(예: 박 신입 + 박신 입 → 박신입 이면
+  // 출발지 2개가 도착지 1줄로 묶인다). 세는 단위를 라벨에 그대로 적어 숫자가 안 맞아 보이는
+  // 착각을 없앤다.
   console.log(
-    `\n이름 ${targets.length}개 변경 (그중 ⚠ 합치기 ${merges.length}건) / 총 ${targets.reduce((s, t) => s + t.rows, 0)}행`,
+    `\n이름 ${targets.length}개 변경 (그중 ⚠ 합침 대상 이름 ${merges.length}개 → 도착지 ${mergeGroups.size}개) / ` +
+      `총 ${targets.reduce((s, t) => s + t.rows, 0)}행`,
   );
   if (merges.length > 0) {
-    console.log('⚠ 합치기는 되돌릴 수 없습니다. 위 건이 정말 같은 사람인지 확인하세요.');
+    console.log(
+      `⚠ 합치기는 되돌릴 수 없습니다. 위 도착지 ${mergeGroups.size}개(옛 이름 ${merges.length}개)가 정말 같은 사람인지 확인하세요.`,
+    );
   }
 
   // 6) --apply 가 없으면 여기서 끝
   if (!apply) {
     console.log('미리보기입니다. 실제로 바꾸려면: npm run fix:playerspaces -- --apply');
-    await prisma.$disconnect();
     return;
   }
 
@@ -104,12 +122,11 @@ async function main(): Promise<void> {
 
   // 8) 끝나면 반드시 안내 출력
   console.log(
-    `✅ 이름 ${targets.length}개 / ${targets.reduce((s, t) => s + t.rows, 0)}행 정리 완료 (그중 ⚠ 합치기 ${merges.length}건).`,
+    `✅ 이름 ${targets.length}개 / ${targets.reduce((s, t) => s + t.rows, 0)}행 정리 완료 ` +
+      `(그중 ⚠ 합침 대상 이름 ${merges.length}개 → 도착지 ${mergeGroups.size}개).`,
   );
   console.log('⚠ 이 스크립트는 서버를 거치지 않고 DB를 바꿉니다. 서버의 이벤트 캐시가 낡은 상태예요.');
   console.log('   POST /api/cache/refresh 를 부르거나 서버를 재시작하세요.');
-
-  await prisma.$disconnect();
 }
 
 main().catch((err) => {

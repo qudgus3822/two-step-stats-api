@@ -1,5 +1,5 @@
 /**
- * [신설: 2026-07-29 21:20, 김병현 작성] 선수 이름 규칙(playerCheck.ts) 검증 스크립트.
+ * [신설: 2026-07-29 15:27, 김병현 작성] 선수 이름 규칙(playerCheck.ts) 검증 스크립트.
  *
  * DB·Nest 없이 `normalizePlayerName` / `findNewPlayers` 만 직접 부른다(check-growth.ts 와
  * 같은 스타일: 수동 fail/eq 헬퍼 + process.exit(0|1), jest 아님 — 이 레포엔 jest/vitest 가 없다).

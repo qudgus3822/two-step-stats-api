@@ -24,13 +24,13 @@ import { SYNERGY_METRICS, SynergyMetric } from './synergy';
 import { GROWTH_METRICS, GrowthMetric } from './growth';
 // [변경: 2026-07-14 17:32, 김병현 수정] 대회 등록부 서비스 주입 (season.service → competition.service 리네임)
 import { CompetitionService } from './competition.service';
-// [신설: 2026-07-29 22:05, 김병현 작성] 처음 보는 선수 이름 판정(순수 모듈).
+// [신설: 2026-07-29 15:31, 김병현 작성] 처음 보는 선수 이름 판정(순수 모듈).
 import { findNewPlayers } from './playerCheck';
 import { GameConflict, NewPlayer, UploadConflictBody } from './types';
 
 @Controller()
 export class StatsController {
-  // [신설: 2026-07-29 22:05, 김병현 작성] 이름 조회 실패를 '조용히 넘기되 흔적은 남기려고' 쓴다.
+  // [신설: 2026-07-29 15:31, 김병현 작성] 이름 조회 실패를 '조용히 넘기되 흔적은 남기려고' 쓴다.
   private readonly logger = new Logger(StatsController.name);
 
   constructor(
@@ -124,10 +124,10 @@ export class StatsController {
     // [변경: 2026-07-14 14:21, 김병현 수정] replace 기본값은 '그 경기만 교체'로 바뀜.
     const useAppend = (mode ?? 'replace').toLowerCase() === 'append';
     // [변경: 2026-07-15 14:10, 김병현 수정] replace 인데 force 아니면, 쓰기 전에 중복 경기부터 확인.
-    // [변경: 2026-07-29 22:05, 김병현 수정] 위 줄은 옛 동작 설명이다 —
+    // [변경: 2026-07-29 15:31, 김병현 수정] 위 줄은 옛 동작 설명이다 —
     // 아래 관문 통합으로 조건이 '!useForce' 하나로 넓어졌고, 보는 것도 중복 경기 + 처음 보는 이름 둘이다.
     const useForce = (force ?? '').toLowerCase() === 'true';
-    // [변경: 2026-07-29 22:05, 김병현 수정] 확인 관문을 '하나'로 합친다.
+    // [변경: 2026-07-29 15:31, 김병현 수정] 확인 관문을 '하나'로 합친다.
     //  - 겹친 경기 검사: 예전 그대로 replace 일 때만 (append 는 덮어쓰는 게 아니라 물을 게 없다)
     //  - 처음 보는 이름 검사: mode 와 무관하게 항상 (append 로도 오타는 똑같이 들어간다)
     // 둘 중 하나라도 걸리면 409 를 '한 번' 던진다. 그래야 사용자가 모달을 두 번 보지 않는다.
@@ -135,7 +135,7 @@ export class StatsController {
     if (!useForce) {
       // 두 조회는 서로를 안 기다려도 된다. DB 가 원격(Supabase)이라 왕복 한 번이 아깝다.
       //
-      // [신설: 2026-07-29 22:05, 김병현 작성] ⚠ 두 쿼리의 '실패 정책'이 다르다.
+      // [신설: 2026-07-29 15:31, 김병현 작성] ⚠ 두 쿼리의 '실패 정책'이 다르다.
       //  - 겹친 경기 조회가 실패하면 → 그대로 터뜨린다(500). 못 물어보고 저장하면 덮어쓰기 사고가 난다.
       //  - 이름 조회가 실패하면 → 삼킨다. 이 검사는 '차단'이 아니라 '확인'이다. 보조 질문 하나가
       //    실패했다고 사용자의 저장을 통째로 막으면, 얻는 것(오타 알림) 없이 잃는 것(업로드 실패)만 남는다.
@@ -237,7 +237,7 @@ export class StatsController {
     }
   }
 
-  // [신설: 2026-07-29 22:05, 김병현 작성] 409 본문의 사람이 읽는 한 줄.
+  // [신설: 2026-07-29 15:31, 김병현 작성] 409 본문의 사람이 읽는 한 줄.
   // 화면(모달)은 games/newPlayers 배열을 보고 제 문구를 직접 만든다 — 이 문자열은 API 를 직접
   // 두드리는 사람과 로그를 위한 것이다.
   // 이름을 나열하지 않고 '개수만' 쓰는 이유: 이름은 어차피 newPlayers 배열에 다 들어 있다.

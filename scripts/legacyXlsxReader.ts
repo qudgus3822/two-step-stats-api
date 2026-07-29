@@ -17,7 +17,7 @@
  */
 import * as XLSX from 'xlsx';
 import { KNOWN_CODES, normalizeCode } from '../src/stats/scoring';
-// [신설: 2026-07-29 21:40, 김병현 작성] 앱 파서와 같은 선수 이름 공백 제거 규칙을 재사용한다.
+// [신설: 2026-07-29 15:29, 김병현 작성] 앱 파서와 같은 선수 이름 공백 제거 규칙을 재사용한다.
 import { normalizePlayerName } from '../src/stats/playerCheck';
 
 // 파싱된 한 행 (DB 무관). 연도·시즌은 있고 팀은 없다(팀은 적재 시점에 '-'로 채운다).
@@ -32,7 +32,7 @@ export interface LegacyRow {
   game: number; // 주차 내 경기 번호
   quarter: number; // 쿼터
   player: string; // 선수 이름 (원본 그대로 — '김진우1' 접미사 유지)
-  // [변경: 2026-07-29 21:40, 김병현 수정] 공백은 제거된다(normalizePlayerName). 숫자 접미사는 위 설명대로 그대로 유지.
+  // [변경: 2026-07-29 15:29, 김병현 수정] 공백은 제거된다(normalizePlayerName). 숫자 접미사는 위 설명대로 그대로 유지.
   stat: string; // 스텟 코드 (normalizeCode 로 대문자 정규화)
   team: string; // 팀명 (엑셀 '팀명' 칸. 칸이 없으면 '-'). 앱 파서와 같은 키워드로 읽는다.
 }
@@ -132,7 +132,7 @@ export function parseLegacyWorkbook(buffer: Buffer): ParseResult {
 
   for (let r = headerIndex + 1; r < grid.length; r++) {
     const row = grid[r] ?? [];
-    // [변경: 2026-07-29 21:40, 김병현 수정] 앱 파서와 같은 규칙으로 이름 공백 제거.
+    // [변경: 2026-07-29 15:29, 김병현 수정] 앱 파서와 같은 규칙으로 이름 공백 제거.
     const player = normalizePlayerName(text(row[cols.player]));
     const rawStat = text(row[cols.stat]);
 
@@ -210,8 +210,8 @@ export function parseLegacyWorkbook(buffer: Buffer): ParseResult {
       team = '-';
     }
 
-    // [변경: 2026-07-29 21:40, 김병현 수정] 위 'player 는 손대지 않는다'는 이제 이 (5)단계 한정이다 — player 는 132행에서 공백만 제거해 둔다.
     // (5) 스텟 코드 정규화 + 미등록 코드 수집(코드는 대문자만, player 는 손대지 않는다).
+    // [변경: 2026-07-29 15:29, 김병현 수정] 위 'player 는 손대지 않는다'는 이제 이 (5)단계 한정이다 — player 는 132행에서 공백만 제거해 둔다.
     const stat = normalizeCode(rawStat);
     if (!KNOWN_CODES.has(stat)) {
       unknown.add(stat);

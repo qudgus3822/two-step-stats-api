@@ -79,7 +79,7 @@ export interface GameConflict {
   game: number; // 주차 내 경기 번호
   existingCount: number; // 이미 DB에 있는 이 경기의 이벤트 행 수
 }
-// [신설: 2026-07-29 21:00, 김병현 작성] 업로드 파일에 나온 "여태 DB에 없던 선수 이름" 한 명.
+// [신설: 2026-07-29 15:25, 김병현 작성] 업로드 파일에 나온 "여태 DB에 없던 선수 이름" 한 명.
 // name 은 파일에서 읽어 정규화(공백 제거)한 값 — 실제로 저장될 값과 완전히 같다.
 // suggestions 는 "혹시 이거 아니에요?" 후보(기존 이름). 없으면 빈 배열.
 export interface NewPlayer {
@@ -87,7 +87,7 @@ export interface NewPlayer {
   suggestions: string[];
 }
 
-// [신설: 2026-07-29 21:00, 김병현 작성] 제안 계산용으로 미리 정규화해 둔 기존 이름 한 개.
+// [신설: 2026-07-29 15:25, 김병현 작성] 제안 계산용으로 미리 정규화해 둔 기존 이름 한 개.
 // (신규 이름마다 다시 정규화하면 N×M 번 돌게 돼서, 진입부에서 한 번만 만들어 돌려 쓴다.)
 // playerCheck.ts 안에서만 쓴다 — 응답에 나가지 않으므로 프론트는 미러하지 않는다.
 export interface KnownName {
@@ -101,7 +101,7 @@ export interface UploadConflictBody {
   competitionId: number;
   competition: string; // 표시 라벨
   games: GameConflict[];
-  // [변경: 2026-07-29 21:00, 김병현 수정] 확인 관문을 하나로 합치면서 필드 추가.
+  // [변경: 2026-07-29 15:25, 김병현 수정] 확인 관문을 하나로 합치면서 필드 추가.
   // ⚠ 이제 games 가 빈 배열인 409 도 있다(겹친 경기는 없고 새 이름만 있는 경우).
   //   예전엔 409 = 무조건 games.length > 0 이었다 — 이 가정을 쓰는 코드가 있으면 고쳐야 한다.
   newPlayers: NewPlayer[];
