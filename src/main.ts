@@ -3,13 +3,14 @@ import 'reflect-metadata';
 import 'dotenv/config';
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+// [변경: 2026-07-29 11:30, 김병현 수정] 응답 본문 gzip 압축 미들웨어 추가.
+import compression from 'compression';
 import { AppModule } from './app.module';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
-  // [변경: 2026-07-27 11:02, 김병현 수정] 모든 API를 /api 밑으로 이동 — 프론트 SPA 경로(/leaderboard 등)와 API 경로가 겹쳐 새로고침 시 JSON이 뜨던 문제 해결
   app.setGlobalPrefix('api');
-  // 프론트(SvelteKit 대시보드 등)에서 브라우저로 직접 호출할 수 있도록 CORS 허용
+  app.use(compression());
   app.enableCors();
   const port = process.env.PORT ? Number(process.env.PORT) : 13000;
   await app.listen(port);

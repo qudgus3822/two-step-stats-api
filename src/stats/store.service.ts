@@ -2,6 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 // [변경: 2026-07-15 14:10, 김병현 수정] 충돌 감지 응답 타입(GameConflict) 추가.
 import { GameConflict, ParsedEvent, StatEvent } from './types';
+// [변경: 2026-07-29 11:40, 김병현 수정] 연장경기 흡수 규칙. "무엇이 한 경기인가"를 아는 곳은
+// aggregate.ts 하나뿐이라, 저장소는 규칙을 모르고 그 함수를 통과시키기만 한다.
+import { mergeOvertimeGames } from './aggregate';
 
 // [신설: 2026-07-29 11:10, 김병현 작성] '전체 대회'(competitionId 없음) 캐시 칸의 키.
 // 문자열 'all' 이 아니라 심볼인 이유: 키 타입이 number | symbol 이라, 혹시라도 대회 id 와
@@ -159,7 +162,7 @@ export class StoreService {
         { id: 'asc' },
       ],
     });
-    return rows.map((r) => ({
+    const events = rows.map((r) => ({
       competitionId: r.competitionId,
       competitionLabel: r.competition.label,
       week: r.week,
@@ -169,6 +172,17 @@ export class StoreService {
       stat: r.stat,
       team: r.team,
     }));
+    // [변경: 2026-07-29 11:40, 김병현 수정] 연장경기를 직전 경기에 흡수시킨 뒤 내보낸다.
+    //
+    // 왜 여기냐: "무엇이 한 경기인가"는 집계 전체가 같은 답을 봐야 한다. 조회 입구 한 곳에서
+    // 정규화하면 리더보드·시너지·기량발전·박스스코어가 전부 저절로 같은 규칙을 쓴다
+    // (호출부마다 부르게 두면 하나 빠뜨렸을 때 화면마다 숫자가 갈린다).
+    // 캐시에도 정규화된 결과가 담겨서 요청마다 다시 계산하지 않는다.
+    //
+    // ⚠ 업로드 경로(replaceGames·findExistingGames)는 엑셀 원본의 (주차,경기)를 그대로 쓴다.
+    //   즉 DB 에는 연장도 원래 번호(g3)로 남고, 덮어쓰기도 g3 단위로 정확히 동작한다.
+    //   흡수는 '읽을 때만' 일어나는 표시/집계 규칙이다.
+    return mergeOvertimeGames(events);
   }
 
   // 특정 대회 삭제 (없으면 전체 삭제)

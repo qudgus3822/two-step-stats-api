@@ -23,6 +23,86 @@ export function gameKey(e: Pick<StatEvent, 'competitionId' | 'week' | 'game'>): 
   return `${e.competitionId} ${e.week} ${e.game}`;
 }
 
+// ── 연장경기 흡수 ──────────────────────────────────────────────────
+// [신설: 2026-07-29 11:40, 김병현 작성]
+//
+// 왜 필요한가: 한 주차에 정규경기(4쿼터)가 끝난 뒤, 쿼터 몇 개만 더 뛴 '덤 경기'가 기록지에
+// 다음 경기 번호(예: g3)로 적히는 경우가 있다. 이걸 별도 경기로 세면 경기당 평균이 확 떨어진다
+// (덤 경기는 짧아서 득점이 적은데 분모는 1이 통째로 늘기 때문). 동호회 관례상 이건 새 경기가
+// 아니라 직전 경기의 '연장'이므로, 앞 경기에 흡수시킨다.
+//
+// 예) 2026 시즌2 나이배 3주차 — g1(4쿼터) g2(4쿼터) g3(2쿼터)
+//     → g3 는 g2 의 연장. 최준혁: 6경기 12.2점 → 4경기 18.3점
+//
+// ⚠ 주의: 판정 기준이 "기록에 남은 쿼터 수"라, 진짜 정규경기인데 엑셀에 2쿼터까지만 입력된
+//   경우도 연장으로 빨려 들어간다. 기록이 통째로 빠진 게 아니라면 이런 일은 없어야 정상이다.
+
+// 연장으로 볼 최대 쿼터 수. 이 수 이하로만 기록된 경기는 직전 경기의 연장으로 본다.
+export const OVERTIME_MAX_QUARTERS = 2;
+
+// "대회 주차" 키 — 같은 날(주차) 안에서만 연장을 찾기 위한 그룹핑 키.
+function weekKey(e: Pick<StatEvent, 'competitionId' | 'week'>): string {
+  return `${e.competitionId} ${e.week}`;
+}
+
+// 연장경기의 이벤트를 직전 정규경기 소속으로 바꿔 돌려준다(입력은 안 건드리는 순수 함수).
+//
+// 바꾸는 건 두 가지뿐이다.
+//   game    → 흡수될 앞 경기 번호 (그래야 gameKey 가 같아져 한 경기로 묶인다)
+//   quarter → 앞 경기 마지막 쿼터 뒤로 밀기 (4쿼터 경기의 연장 1·2쿼터 = 5·6쿼터)
+//             쿼터 번호가 안 겹치게 하려는 것. 지금 집계는 쿼터를 안 쓰지만, 나중에 쿼터별
+//             통계를 붙였을 때 "1쿼터가 두 번 있는 경기"가 되는 함정을 미리 막는다.
+//
+// 그 주차의 '첫' 경기가 짧으면 흡수할 앞 경기가 없다 → 그냥 정규경기로 둔다.
+export function mergeOvertimeGames(events: StatEvent[]): StatEvent[] {
+  // 1) 경기별 쿼터 집합 + 주차별 경기 번호 목록을 한 번에 훑어 모은다.
+  const quartersOf = new Map<string, Set<number>>();
+  const gamesOfWeek = new Map<string, Set<number>>();
+  for (const e of events) {
+    const gk = gameKey(e);
+    let q = quartersOf.get(gk);
+    if (!q) {
+      q = new Set();
+      quartersOf.set(gk, q);
+    }
+    q.add(e.quarter);
+
+    const wk = weekKey(e);
+    let gs = gamesOfWeek.get(wk);
+    if (!gs) {
+      gs = new Set();
+      gamesOfWeek.set(wk, gs);
+    }
+    gs.add(e.game);
+  }
+
+  // 2) 주차마다 경기를 번호순으로 훑으며 "연장 → 어느 경기에 붙을지" 표를 만든다.
+  //    연장이 연달아 둘이면 둘 다 같은 앞 경기에 붙고, 쿼터만 계속 뒤로 밀린다.
+  const absorb = new Map<string, { game: number; quarterShift: number }>();
+  for (const [wk, gameNos] of gamesOfWeek) {
+    let host: number | null = null; // 흡수할 앞 경기 번호 (아직 없으면 null)
+    let lastQuarter = 0; // 그 경기에서 지금까지 쓴 마지막 쿼터 번호
+    for (const g of [...gameNos].sort((a, b) => a - b)) {
+      const quarters = quartersOf.get(`${wk} ${g}`);
+      if (!quarters) continue; // 이론상 없음 — 위에서 같이 채웠다
+      if (host !== null && quarters.size <= OVERTIME_MAX_QUARTERS) {
+        absorb.set(`${wk} ${g}`, { game: host, quarterShift: lastQuarter });
+        lastQuarter += quarters.size; // 연장이 또 붙으면 그 뒤로
+      } else {
+        host = g;
+        lastQuarter = Math.max(...quarters);
+      }
+    }
+  }
+
+  // 연장이 하나도 없으면 새 배열을 만들 이유가 없다(대부분의 대회가 여기 해당).
+  if (absorb.size === 0) return events;
+  return events.map((e) => {
+    const to = absorb.get(gameKey(e));
+    return to ? { ...e, game: to.game, quarter: to.quarterShift + e.quarter } : e;
+  });
+}
+
 // URL-safe 경기 식별자 (한글은 유지)
 // [변경: 2026-07-14 17:32, 김병현 수정] 대회 문자열 대신 competitionId(FK, 숫자)를 직접 사용하도록 변경.
 // 대회명이 바뀌어도 id 가 안 바뀌게 하려는 목적 — slug(대회명) 대신 안정적인 숫자 키를 쓴다.
