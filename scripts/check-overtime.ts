@@ -14,11 +14,18 @@
  *  - 3쿼터까지만 기록된 경기는 연장이 아니다(경계값 — 실제 데이터에 이런 경기가 있다)
  *  - 주차·대회 경계를 안 넘는다(다른 주차의 앞 경기로 빨려가지 않는다)
  *  - 연장이 없는 입력은 배열을 새로 만들지 않는다(같은 참조를 돌려준다)
+ *  - [H] 핵심 불변식 — 같은 원본으로 경기 목록은 3줄(연장 표시 포함), 스탯은 2경기
  *
  * 검증 관점: "경기 수가 줄었다"만 보면 득점을 통째로 날려도 통과한다. 그래서 경기 수와
  * 총득점을 항상 같이 확인한다.
  */
-import { mergeOvertimeGames, gameKey, listPlayers } from '../src/stats/aggregate';
+import {
+  boxScoreForGame,
+  gameKey,
+  listGames,
+  listPlayers,
+  mergeOvertimeGames,
+} from '../src/stats/aggregate';
 import { StatEvent } from '../src/stats/types';
 
 // 픽스처 이벤트 한 줄.
@@ -166,9 +173,45 @@ function main(): void {
     eq('G 입력 불변', raw.map((e) => `${e.game}:${e.quarter}`).join('|'), before);
   }
 
+  // ── H. 핵심 불변식: "목록은 3경기, 스탯은 2경기" ────────────────────────────
+  //  [신설: 2026-07-29 12:10, 김병현 작성] 화면(원본)과 스탯(흡수본)이 일부러 다른 답을 낸다.
+  //  같은 원본 이벤트를 넣고 두 경로가 각자 제 답을 내는지 한 자리에서 확인한다.
+  {
+    const raw = [
+      ...fullGame(3, 1, '갑'), // 8점
+      ...fullGame(3, 2, '갑'), // 8점
+      ...overtimeGame(3, 3, '갑'), // 4점 — g2 의 연장
+    ];
+
+    // 경기 목록(원본) — 3줄 그대로, 마지막 줄만 연장 표시
+    const rows = listGames(raw);
+    eq('H 목록 줄 수', rows.length, 3);
+    eq('H 목록 연장 표시 개수', rows.filter((r) => r.overtime).length, 1);
+    eq('H 연장인 경기는 g3', rows.find((r) => r.overtime)?.game, 3);
+    eq('H 정규경기는 표시 없음', rows.filter((r) => !r.overtime).map((r) => r.game).join(','), '1,2');
+    // 연장도 자기 점수를 그대로 들고 있다(목록에서 0점짜리로 보이면 안 된다)
+    eq('H 연장 줄 팀 점수', rows.find((r) => r.overtime)?.teams[0].score, 4);
+
+    // 스탯(흡수본) — 2경기, 평균은 20/2
+    const [row] = listPlayers(mergeOvertimeGames(raw));
+    eq('H 스탯 경기 수', row.games, 2);
+    eq('H 스탯 누적 득점', row.pts, 20);
+    eq('H 스탯 경기당 평균', row.ppg, 10);
+
+    // 목록 줄 수 > 스탯 경기 수 — 이 차이가 이 기능의 존재 이유다
+    eq('H 목록이 스탯보다 연장 수만큼 많다', rows.length - row.games, 1);
+
+    // 박스스코어도 연장 표시를 들고 있다(연장 경기를 따로 눌러볼 수 있다)
+    const otBox = boxScoreForGame(raw, rows.find((r) => r.overtime)!.id);
+    eq('H 연장 박스스코어 존재', otBox !== null, true);
+    eq('H 연장 박스스코어 표시', otBox?.overtime, true);
+    const fullBox = boxScoreForGame(raw, rows.find((r) => !r.overtime)!.id);
+    eq('H 정규 박스스코어 표시 없음', fullBox?.overtime, false);
+  }
+
   if (failures === 0) {
     console.log(
-      '✓ 검증 통과 — 연장 흡수(경기 수 ↓·득점 보존), 쿼터 밀기, 연속 연장, 첫 경기 예외, 3쿼터 경계, 주차/대회 경계, 무복사, 입력 불변',
+      '✓ 검증 통과 — 연장 흡수(경기 수 ↓·득점 보존), 쿼터 밀기, 연속 연장, 첫 경기 예외, 3쿼터 경계, 주차/대회 경계, 무복사, 입력 불변, 목록3경기/스탯2경기 분리',
     );
     process.exit(0);
   } else {

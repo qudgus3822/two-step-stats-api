@@ -66,6 +66,10 @@ export interface GameSummary {
   teams: { team: string; score: number }[];
   winner: string | null; // 무승부면 null
   events: number; // 이 경기의 이벤트 수
+  // [변경: 2026-07-29 12:10, 김병현 수정] 이 경기가 앞 경기의 '연장'인지.
+  // 경기 목록엔 따로 한 줄로 보이지만(연장도 하나의 경기처럼), 스탯 집계에선 앞 경기에 합쳐진다.
+  // 즉 "화면엔 3경기, 평균 계산은 2경기"를 가능하게 하는 표시용 깃발이다.
+  overtime: boolean;
 }
 
 // [변경: 2026-07-15 14:10, 김병현 수정] 업로드 중복 경기 감지 — 충돌 한 건과 409 응답 모양.

@@ -45,16 +45,21 @@ function weekKey(e: Pick<StatEvent, 'competitionId' | 'week'>): string {
   return `${e.competitionId} ${e.week}`;
 }
 
-// 연장경기의 이벤트를 직전 정규경기 소속으로 바꿔 돌려준다(입력은 안 건드리는 순수 함수).
+// 연장 한 건이 "어디에 어떻게 붙는지".
+// [변경: 2026-07-29 12:10, 김병현 수정] mergeOvertimeGames 안에 있던 지역 타입을 파일 최상위로 올림 —
+// findOvertimeGames 가 이걸 돌려주고, 흡수(mergeOvertimeGames)와 표시(listGames)가 같이 쓴다.
+type OvertimeLink = {
+  game: number; // 흡수될 앞 경기 번호
+  quarterShift: number; // 쿼터를 얼마나 뒤로 밀지
+};
+
+// 어느 경기가 연장인지 찾아 gameKey → 붙을 곳 표로 돌려준다.
 //
-// 바꾸는 건 두 가지뿐이다.
-//   game    → 흡수될 앞 경기 번호 (그래야 gameKey 가 같아져 한 경기로 묶인다)
-//   quarter → 앞 경기 마지막 쿼터 뒤로 밀기 (4쿼터 경기의 연장 1·2쿼터 = 5·6쿼터)
-//             쿼터 번호가 안 겹치게 하려는 것. 지금 집계는 쿼터를 안 쓰지만, 나중에 쿼터별
-//             통계를 붙였을 때 "1쿼터가 두 번 있는 경기"가 되는 함정을 미리 막는다.
-//
-// 그 주차의 '첫' 경기가 짧으면 흡수할 앞 경기가 없다 → 그냥 정규경기로 둔다.
-export function mergeOvertimeGames(events: StatEvent[]): StatEvent[] {
+// [변경: 2026-07-29 12:10, 김병현 수정] mergeOvertimeGames 에서 '판별'만 떼어냈다.
+// 이유: 스탯은 연장을 흡수해야 하지만(2경기), 경기 목록은 연장을 따로 보여줘야 한다(3경기).
+// 두 화면이 "무엇이 연장인가"에 대해 다른 답을 내면 안 되므로, 판별 지식은 이 함수 하나에만 둔다.
+// 표에 없는 경기 = 정규경기다.
+function findOvertimeGames(events: StatEvent[]): Map<string, OvertimeLink> {
   // 1) 경기별 쿼터 집합 + 주차별 경기 번호 목록을 한 번에 훑어 모은다.
   const quartersOf = new Map<string, Set<number>>();
   const gamesOfWeek = new Map<string, Set<number>>();
@@ -78,7 +83,7 @@ export function mergeOvertimeGames(events: StatEvent[]): StatEvent[] {
 
   // 2) 주차마다 경기를 번호순으로 훑으며 "연장 → 어느 경기에 붙을지" 표를 만든다.
   //    연장이 연달아 둘이면 둘 다 같은 앞 경기에 붙고, 쿼터만 계속 뒤로 밀린다.
-  const absorb = new Map<string, { game: number; quarterShift: number }>();
+  const absorb = new Map<string, OvertimeLink>();
   for (const [wk, gameNos] of gamesOfWeek) {
     let host: number | null = null; // 흡수할 앞 경기 번호 (아직 없으면 null)
     let lastQuarter = 0; // 그 경기에서 지금까지 쓴 마지막 쿼터 번호
@@ -94,7 +99,20 @@ export function mergeOvertimeGames(events: StatEvent[]): StatEvent[] {
       }
     }
   }
+  return absorb;
+}
 
+// 연장경기의 이벤트를 직전 정규경기 소속으로 바꿔 돌려준다(입력은 안 건드리는 순수 함수).
+//
+// 바꾸는 건 두 가지뿐이다.
+//   game    → 흡수될 앞 경기 번호 (그래야 gameKey 가 같아져 한 경기로 묶인다)
+//   quarter → 앞 경기 마지막 쿼터 뒤로 밀기 (4쿼터 경기의 연장 1·2쿼터 = 5·6쿼터)
+//             쿼터 번호가 안 겹치게 하려는 것. 지금 집계는 쿼터를 안 쓰지만, 나중에 쿼터별
+//             통계를 붙였을 때 "1쿼터가 두 번 있는 경기"가 되는 함정을 미리 막는다.
+//
+// 그 주차의 '첫' 경기가 짧으면 흡수할 앞 경기가 없다 → 그냥 정규경기로 둔다.
+export function mergeOvertimeGames(events: StatEvent[]): StatEvent[] {
+  const absorb = findOvertimeGames(events);
   // 연장이 하나도 없으면 새 배열을 만들 이유가 없다(대부분의 대회가 여기 해당).
   if (absorb.size === 0) return events;
   return events.map((e) => {
@@ -207,8 +225,13 @@ function sortByGame<T extends { competition: string; week: number; game: number 
 // ── 공개 집계 API ────────────────────────────────────────────────────
 
 // 전체 경기 목록 (팀 점수/승패 요약)
+// [변경: 2026-07-29 12:10, 김병현 수정] 연장경기를 '흡수하지 않고' 별도 행으로 두되 overtime 표시를 붙인다.
+// 이 함수는 원본 이벤트(흡수 전)를 받는다 — 화면에선 "2경기 + 연장"을 따로 보고 싶고,
+// 스탯에선 2경기로 치고 싶기 때문. 그래서 흡수는 스탯 경로에서만 일어난다
+// (누가 원본을 보고 누가 흡수본을 보는지는 stats.service.ts 한 곳에서 정한다).
 export function listGames(events: StatEvent[]): GameSummary[] {
   const games = groupGames(events);
+  const overtimes = findOvertimeGames(events);
   const out: GameSummary[] = [];
   for (const evs of games.values()) {
     // [변경: 2026-07-14 17:32, 김병현 수정] season(문자열) → competitionId+competitionLabel.
@@ -223,6 +246,8 @@ export function listGames(events: StatEvent[]): GameSummary[] {
       teams,
       winner,
       events: evs.length,
+      // 이 경기가 앞 경기의 연장인가. 스탯에선 앞 경기에 합쳐지지만 목록엔 따로 보인다.
+      overtime: overtimes.has(gameKey(evs[0])),
     });
   }
   return out.sort(sortByGame);
@@ -238,9 +263,12 @@ export function boxScoreForGame(
   week: number;
   game: number;
   winner: string | null;
+  // [변경: 2026-07-29 12:10, 김병현 수정] 목록과 같은 연장 표시 — 상세 화면에서도 "이건 연장"임을 알린다.
+  overtime: boolean;
   teams: { team: string; score: number; players: PlayerLine[] }[];
 } | null {
   const games = groupGames(events);
+  const overtimes = findOvertimeGames(events);
   for (const evs of games.values()) {
     // [변경: 2026-07-14 17:32, 김병현 수정] season(문자열) → competitionId+competitionLabel.
     const { competitionId, competitionLabel, week, game } = evs[0];
@@ -277,7 +305,15 @@ export function boxScoreForGame(
         ? teams[0].team
         : null;
 
-    return { id, competition: competitionLabel, week, game, winner, teams };
+    return {
+      id,
+      competition: competitionLabel,
+      week,
+      game,
+      winner,
+      overtime: overtimes.has(gameKey(evs[0])),
+      teams,
+    };
   }
   return null;
 }
