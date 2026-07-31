@@ -16,7 +16,9 @@
  *   컬럼은 index 무시 규칙과 "가장 왼쪽 컬럼 우선"으로 안 걸린다.
  */
 import * as XLSX from 'xlsx';
-import { KNOWN_CODES, normalizeCode } from '../src/stats/scoring';
+// [변경: 2026-07-31 15:02, 김병현 수정] 앱 파서와 같은 규칙으로 한글 코드를 되돌려 인식한다.
+import { KNOWN_CODES, resolveStatCode } from '../src/stats/scoring';
+import { HangulCodeFix } from '../src/stats/types';
 // [신설: 2026-07-29 15:29, 김병현 작성] 앱 파서와 같은 선수 이름 공백 제거 규칙을 재사용한다.
 import { normalizePlayerName } from '../src/stats/playerCheck';
 
@@ -34,6 +36,8 @@ export interface LegacyRow {
   player: string; // 선수 이름 (원본 그대로 — '김진우1' 접미사 유지)
   // [변경: 2026-07-29 15:29, 김병현 수정] 공백은 제거된다(normalizePlayerName). 숫자 접미사는 위 설명대로 그대로 유지.
   stat: string; // 스텟 코드 (normalizeCode 로 대문자 정규화)
+  // [변경: 2026-07-31 15:02, 김병현 수정] 이제 resolveStatCode 다 — 대문자 정규화에 더해, 한글로 친
+  //   코드면 두벌식 자판을 되돌려 사전에 있는 코드로 바꾼다(되돌린 게 사전에 없으면 그대로 유지).
   team: string; // 팀명 (엑셀 '팀명' 칸. 칸이 없으면 '-'). 앱 파서와 같은 키워드로 읽는다.
 }
 
@@ -50,6 +54,8 @@ export interface ParseResult {
   warnings: ParseWarning[];
   unknownCodes: string[]; // 중복 제거된 미등록 코드 목록
   sheet: string; // 실제로 읽은 시트 이름
+  // [신설: 2026-07-31 15:02, 김병현 작성] 앱 파서(parser.service.ts)와 같은 모양의 보고 필드.
+  hangulCodes: HangulCodeFix[];
 }
 
 // 대회(=(year, seasonNo) 그룹)별 개수 요약. 라벨은 여기서 안 만든다
@@ -119,6 +125,8 @@ export function parseLegacyWorkbook(buffer: Buffer): ParseResult {
   const rows: LegacyRow[] = [];
   const warnings: ParseWarning[] = [];
   const unknown = new Set<string>();
+  // [신설: 2026-07-31 15:02, 김병현 작성] 앱 파서와 같은 방식 — 한글 값 → 인식 결과·건수(첫 등장 순).
+  const hangulHits = new Map<string, HangulCodeFix>();
 
   // 병합 셀 대비 forward-fill 상태. null = "아직 값을 본 적 없음".
   let lastYear: number | null = null;
@@ -212,7 +220,16 @@ export function parseLegacyWorkbook(buffer: Buffer): ParseResult {
 
     // (5) 스텟 코드 정규화 + 미등록 코드 수집(코드는 대문자만, player 는 손대지 않는다).
     // [변경: 2026-07-29 15:29, 김병현 수정] 위 'player 는 손대지 않는다'는 이제 이 (5)단계 한정이다 — player 는 132행에서 공백만 제거해 둔다.
-    const stat = normalizeCode(rawStat);
+    // [변경: 2026-07-31 15:02, 김병현 수정] 앱 파서와 같은 규칙 — 한영 전환을 깜빡하고 친 코드도
+    //   두벌식 자판을 되돌려 인식한다. 되돌린 게 사전에 있을 때만 채택되므로, 여기서 stat 이
+    //   바뀌었다면 반드시 아는 코드다 → 바로 아래 미등록 경고에는 절대 안 걸린다.
+    const resolved = resolveStatCode(rawStat);
+    const stat = resolved.code;
+    if (resolved.hangulSource) {
+      const hit = hangulHits.get(resolved.hangulSource);
+      if (hit) hit.count++;
+      else hangulHits.set(resolved.hangulSource, { from: resolved.hangulSource, to: stat, count: 1 });
+    }
     if (!KNOWN_CODES.has(stat)) {
       unknown.add(stat);
       warnings.push({
@@ -226,7 +243,14 @@ export function parseLegacyWorkbook(buffer: Buffer): ParseResult {
     rows.push({ year, seasonNo, week, game, quarter, player, stat, team });
   }
 
-  return { rows, warnings, unknownCodes: [...unknown], sheet: sheetName };
+  return {
+    rows,
+    warnings,
+    unknownCodes: [...unknown],
+    sheet: sheetName,
+    // [신설: 2026-07-31 15:02, 김병현 작성]
+    hangulCodes: [...hangulHits.values()],
+  };
 }
 
 // 파싱된 행들을 (year, seasonNo) 대회 단위로 묶는다(첫 등장 순). 요약·적재가 같은 그룹핑을

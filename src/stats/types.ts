@@ -95,6 +95,31 @@ export interface KnownName {
   norm: string; // normalizePlayerName(raw)
 }
 
+// [신설: 2026-07-31 14:35, 김병현 작성] 스텟 코드 한 칸을 해석한 결과.
+// code        = 최종 채택된 코드(대문자). 아무 일도 없었으면 그냥 정규화만 한 원본이다.
+// hangulSource= 한글로 친 걸 되돌려 채택했을 때만 값이 들어간다. 아니면 null.
+//               ⚠ 값은 '파일에 있던 글자 그대로'가 아니라 '되돌리기에 넣은 값' = normalizeCode(raw) 다
+//                 (앞뒤 공백 제거 + 영문 대문자화). 정의와 이유는 아래 HangulCodeFix.from 주석과 같다.
+//               null 이 곧 "값을 한 글자도 안 건드렸다"는 뜻이다.
+export interface StatCodeResolution {
+  code: string;
+  hangulSource: string | null;
+}
+
+// [신설: 2026-07-31 14:35, 김병현 작성] "한글로 친 코드를 자동 인식했다"는 보고 한 줄.
+// 행 단위가 아니라 종류 단위다 — 한 열을 통째로 한글로 치면 수백 행이라 행마다 알리면 화면이 죽는다.
+export interface HangulCodeFix {
+  // [주의] from 은 '파일에 있던 글자 그대로'가 아니라 '되돌리기에 넣은 값'이다
+  //   = normalizeCode 를 거친 값(앞뒤 공백 제거 + 영문 대문자화). 위 hangulSource 와 같은 값이다.
+  //   예) 파일 셀 '  2fㅁ  '  ->  from '2Fㅁ'.  한글 부분은 파일과 글자 그대로 같고,
+  //   영문 대소문자만 다를 수 있다(엑셀 찾기는 대소문자를 안 가려서 찾는 데 지장 없음).
+  //   왜 이걸 쓰나: 이 값이 종류를 묶는 열쇠라서, 파일 값을 그대로 쓰면 'ㅇㄱ' 와 'ㅇㄱ '(뒤 공백)이
+  //   서로 다른 줄로 갈라진다.
+  from: string;
+  to: string;    // 되돌려 채택한 코드 (예: 2FA)
+  count: number; // 그렇게 읽은 행 수
+}
+
 // 409 Conflict 응답 body. conflict:true 가 "덮어쓰기 확인용"임을 알리는 판별 필드.
 export interface UploadConflictBody {
   conflict: true;

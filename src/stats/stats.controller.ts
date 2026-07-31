@@ -179,6 +179,9 @@ export class StatsController {
       mode: useAppend ? 'append' : 'replace',
       imported,
       unknownCodes: parsed.unknownCodes,
+      // [신설: 2026-07-31 15:02, 김병현 작성] 한글로 친 코드를 되돌려 인식한 결과(종류·건수).
+      // 조용히 바뀌면 안 되니 화면까지 그대로 흘려보낸다.
+      hangulCodes: parsed.hangulCodes,
       warnings: parsed.warnings,
     };
   }

@@ -134,6 +134,14 @@ function printParseSummary(filePath: string, result: ParseResult): void {
   if (result.unknownCodes.length) {
     console.log(`미등록 스텟 코드: ${result.unknownCodes.join(', ')}`);
   }
+  // [신설: 2026-07-31 15:02, 김병현 작성] 자동으로 바꿔 읽은 건 반드시 눈에 보이게 찍는다.
+  if (result.hangulCodes.length) {
+    const total = result.hangulCodes.reduce((sum, h) => sum + h.count, 0);
+    console.log(
+      `한글로 입력된 코드 ${result.hangulCodes.length}종 ${total}건 자동 인식: ` +
+        result.hangulCodes.map((h) => `${h.from}→${h.to}(${h.count}건)`).join(', '),
+    );
+  }
   if (result.warnings.length) {
     console.log(`경고 ${result.warnings.length}건 (처음 10건):`);
     for (const w of result.warnings.slice(0, 10)) {

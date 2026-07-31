@@ -1,7 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as XLSX from 'xlsx';
-import { ParsedEvent } from './types';
-import { KNOWN_CODES, normalizeCode } from './scoring';
+import { HangulCodeFix, ParsedEvent } from './types';
+// [변경: 2026-07-31 15:01, 김병현 수정] normalizeCode 대신 resolveStatCode 를 쓴다
+// (한글로 친 코드를 두벌식 자판대로 되돌려 인식하기 위해). 사전 대조는 그대로 KNOWN_CODES.
+import { KNOWN_CODES, resolveStatCode } from './scoring';
 // [신설: 2026-07-29 15:28, 김병현 작성] 선수 이름 공백 제거 규칙(playerCheck.ts 가 유일한 출처).
 import { normalizePlayerName } from './playerCheck';
 
@@ -21,6 +23,9 @@ export interface ParseResult {
   events: ParsedEvent[]; // 정규화된 이벤트 목록(대회 없음)
   warnings: ParseWarning[];
   unknownCodes: string[]; // 발견된 미등록 코드 목록(중복 제거)
+  // [신설: 2026-07-31 15:01, 김병현 작성] 한글로 친 코드를 되돌려 인식한 결과(종류 단위, 첫 등장 순).
+  // 비어 있으면 "그런 일 없었음". 화면이 이걸 보고 "자동 인식했어요"를 띄운다.
+  hangulCodes: HangulCodeFix[];
 }
 
 // 헤더 컬럼을 찾기 위한 키워드 사전. 셀 텍스트에 키워드가 포함되면 해당 필드로 인식.
@@ -66,6 +71,9 @@ export class ParserService {
     const events: ParsedEvent[] = [];
     const warnings: ParseWarning[] = [];
     const unknown = new Set<string>();
+    // [신설: 2026-07-31 15:01, 김병현 작성] 한글 값 → 인식 결과·건수. Map 이라 첫 등장 순서가 유지된다
+    // (순서를 못 박아야 검증 스크립트가 값을 단언할 수 있다).
+    const hangulHits = new Map<string, HangulCodeFix>();
 
     // 병합 셀 대비: 주차/경기/쿼터/팀명은 비어 있으면 직전 값으로 채운다(forward-fill).
     let lastWeek = 0;
@@ -94,7 +102,16 @@ export class ParserService {
       // 선수/스텟이 둘 다 없는 행은 데이터가 아님 (오른쪽 범례/빈 행) → 건너뜀
       if (!player || !rawStat) continue;
 
-      const stat = normalizeCode(rawStat);
+      // [변경: 2026-07-31 15:01, 김병현 수정] 한영 전환을 깜빡하고 친 코드도 인식한다.
+      // 되돌린 결과가 사전에 있을 때만 채택되므로, 여기서 stat 이 바뀌었다면 반드시 아는 코드다
+      // → 바로 아래 미등록 경고에는 절대 안 걸린다.
+      const resolved = resolveStatCode(rawStat);
+      const stat = resolved.code;
+      if (resolved.hangulSource) {
+        const hit = hangulHits.get(resolved.hangulSource);
+        if (hit) hit.count++;
+        else hangulHits.set(resolved.hangulSource, { from: resolved.hangulSource, to: stat, count: 1 });
+      }
       if (!KNOWN_CODES.has(stat)) {
         unknown.add(stat);
         warnings.push({
@@ -116,12 +133,21 @@ export class ParserService {
     }
     // [변경: 2026-07-14 17:32, 김병현 수정] 로그 문구에서 시즌 언급 제거(파서는 대회를 모름).
     this.logger.log(`파싱 완료: ${events.length}건 이벤트 (시트: ${sheetName})`);
+    // [신설: 2026-07-31 15:01, 김병현 작성] 조용히 바뀌면 안 된다 — 서버 로그에도 남긴다.
+    if (hangulHits.size > 0) {
+      const total = [...hangulHits.values()].reduce((sum, h) => sum + h.count, 0);
+      this.logger.log(
+        `한글로 입력된 스텟 코드 ${hangulHits.size}종 ${total}건 자동 인식 (시트: ${sheetName})`,
+      );
+    }
 
     return {
       sheet: sheetName,
       events,
       warnings,
       unknownCodes: [...unknown],
+      // [신설: 2026-07-31 15:01, 김병현 작성]
+      hangulCodes: [...hangulHits.values()],
     };
   }
 

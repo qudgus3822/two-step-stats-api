@@ -20,6 +20,7 @@
     "check:growth": "ts-node scripts/check-growth.ts",
     "check:overtime": "ts-node scripts/check-overtime.ts",
     "check:newplayers": "ts-node scripts/check-new-players.ts",
+    "check:hangul": "ts-node scripts/check-hangul-codes.ts",
     "fix:playerspaces": "ts-node scripts/fix-player-spaces.ts",
     "import:legacy": "ts-node scripts/import-legacy-xlsx.ts",
     "postinstall": "prisma generate"
