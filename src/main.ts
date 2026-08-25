@@ -11,7 +11,14 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
   app.setGlobalPrefix('api');
   app.use(compression());
-  app.enableCors();
+  // [변경: 2026-08-25 16:40, 김병현 수정] 내려받기 응답의 헤더를 브라우저 JS 가 읽을 수 있게 연다.
+  //
+  // CORS 기본값에서 fetch 가 읽을 수 있는 헤더는 몇 개 안 되는 '안전 목록'뿐이라,
+  // 아무리 서버가 보내도 Content-Disposition 은 프론트에서 안 보인다(에러도 안 난다 —
+  // 그냥 null 이라 파일 이름이 조용히 'download' 가 된다). 그래서 명시적으로 노출한다.
+  //  - Content-Disposition : 서버가 지은 파일 이름 (GET /api/export)
+  //  - X-Rawdata-Rows      : 내보낸 행 수 (화면 안내용)
+  app.enableCors({ exposedHeaders: ['Content-Disposition', 'X-Rawdata-Rows'] });
   const port = process.env.PORT ? Number(process.env.PORT) : 13000;
   await app.listen(port);
   new Logger('Bootstrap').log(`투스텝 기록 API 서버 실행: http://localhost:${port}`);

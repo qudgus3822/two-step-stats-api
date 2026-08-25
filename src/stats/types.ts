@@ -132,3 +132,47 @@ export interface UploadConflictBody {
   newPlayers: NewPlayer[];
   message: string; // 사람이 읽는 안내
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [신설: 2026-08-25 16:40, 김병현 작성] 원본(rawdata) 양식 내보내기
+//
+// 업로드의 반대 방향이다 — DB에 쌓인 이벤트를 scripts/fixtures/rawdata.xlsx 와 똑같은
+// 12칸 표로 되돌린다. 칸 이름·순서를 원본과 글자까지 맞추는 게 목적이라, 여기 타입들은
+// "우리가 보기 좋은 모양"이 아니라 "원본 엑셀의 모양"을 따른다.
+// 칸 순서의 유일한 출처는 rawExport.ts 의 COLUMNS 배열이다.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// 셀 하나에 들어갈 수 있는 값.
+// 빈칸은 null 이 아니라 ''(빈 문자열)로 통일한다 — 원본 파일이 그렇게 돼 있고,
+// null 을 넣으면 xlsx 가 셀 자체를 안 만들어서 붙여넣기할 때 칸이 밀린다.
+export type RawDataCell = string | number;
+
+// rawdata 시트 한 행. 필드 이름은 우리 말(영문)이고, 한글 헤더로 바꾸는 건 COLUMNS 가 한다.
+export interface RawDataRow {
+  year: number; // 연도
+  seasonNo: RawDataCell; // 시즌 — 시즌번호 없는 대회면 ''
+  week: number; // 주차
+  game: number; // 경기
+  quarter: number; // 쿼터
+  player: string; // 선수
+  // 스텟 — 코드가 숫자뿐이면(예: '2') 숫자로 넣는다. 원본이 그렇게 저장돼 있어서다
+  // (엑셀에서 문자열 '2' 는 초록 삼각형 경고가 붙는다).
+  stat: RawDataCell;
+  team: string; // 팀명
+  // [주의] 아래 둘은 DB에 아예 없는 값이라 항상 ''(빈칸)이다.
+  //   팀index('1팀/2팀')  — 경기 안에서 몇 번째 팀인지. 우리는 팀 '이름'만 저장한다.
+  //   활동여부('활동/비활동') — 선수 명단 속성. stat_events 에 선수 속성 칸이 없다.
+  // 칸을 빼지 않고 빈칸으로 남기는 이유: 원본 엑셀에 그대로 붙여넣으려면 칸 순서가
+  // 한 칸도 어긋나면 안 된다. 없는 값을 지어내는 것보다 비워 두는 게 정직하다.
+  teamIndex: RawDataCell;
+  active: RawDataCell;
+  weekIndex: string; // 주차인덱스 — 예: '2023S1W1G1'
+  points: RawDataCell; // 득점 — 0점짜리 코드면 ''(원본이 빈칸이다)
+}
+
+// 내보내기 한 번의 결과물. 파일 이름을 서버가 정하는 이유는 export.service.ts 주석 참고.
+export interface RawDataExport {
+  buffer: Buffer; // .xlsx 바이트
+  fileName: string; // 예: 'rawdata_2023 시즌1 · 나이배_20260825.xlsx'
+  rowCount: number; // 헤더를 뺀 데이터 행 수(로그·응답 헤더용)
+}

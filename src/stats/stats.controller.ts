@@ -10,10 +10,16 @@ import {
   Param,
   Post,
   Query,
+  // [변경: 2026-08-25 16:40, 김병현 수정] 내보내기는 파일 바이트를 직접 내려보내야 해서
+  // 응답 객체(@Res)와 파일 응답 타입(StreamableFile)이 필요하다.
+  Res,
+  StreamableFile,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+// 헤더(Content-Disposition)를 직접 세팅하려고 express 응답 타입을 쓴다(타입 전용 import).
+import type { Response } from 'express';
 import { ParserService } from './parser.service';
 import { StoreService } from './store.service';
 import { StatsService } from './stats.service';
@@ -24,6 +30,8 @@ import { SYNERGY_METRICS, SynergyMetric } from './synergy';
 import { GROWTH_METRICS, GrowthMetric } from './growth';
 // [변경: 2026-07-14 17:32, 김병현 수정] 대회 등록부 서비스 주입 (season.service → competition.service 리네임)
 import { CompetitionService } from './competition.service';
+// [변경: 2026-08-25 16:40, 김병현 수정] 원본(rawdata) 엑셀 내보내기.
+import { ExportService } from './export.service';
 // [신설: 2026-07-29 15:31, 김병현 작성] 처음 보는 선수 이름 판정(순수 모듈).
 import { findNewPlayers } from './playerCheck';
 import { GameConflict, NewPlayer, UploadConflictBody } from './types';
@@ -39,6 +47,8 @@ export class StatsController {
     private readonly stats: StatsService,
     // [변경: 2026-07-14 17:32, 김병현 수정] seasonRegistry → competitionRegistry(타입 CompetitionService)
     private readonly competitionRegistry: CompetitionService,
+    // [변경: 2026-08-25 16:40, 김병현 수정] 원본 데이터 내려받기 담당.
+    private readonly exporter: ExportService,
   ) {}
 
   // API 인덱스 (사용 가능한 엔드포인트 안내)
@@ -184,6 +194,40 @@ export class StatsController {
       hangulCodes: parsed.hangulCodes,
       warnings: parsed.warnings,
     };
+  }
+
+  // [신설: 2026-08-25 16:40, 김병현 작성] 원본(rawdata) 데이터 내려받기 — 업로드의 반대 방향.
+  //
+  // DB에 쌓인 이벤트를 scripts/fixtures/rawdata.xlsx 와 똑같은 12칸 시트로 되돌려 준다.
+  // competitionId 를 주면 그 대회만, 생략하면 전체 대회를 한 파일에 담는다.
+  // (없는 대회 id 면 서비스가 404 를 던진다 — 헤더만 있는 빈 파일을 주면 사용자가
+  //  뭐가 잘못됐는지 알 길이 없어서다. 자세한 이유는 export.service.ts 주석.)
+  //
+  // 왜 @Res 를 쓰나: 파일 이름이 대회마다 달라서 @Header() 데코레이터(고정값)로는 못 붙인다.
+  // passthrough:true 라 응답을 직접 끝내지 않는다 — 헤더만 얹고 나머지는 Nest 에 맡긴다.
+  //
+  // ⚠ 이 응답의 진짜 정보(파일 이름)는 본문이 아니라 헤더에 있다. 브라우저 fetch 는
+  //   CORS 에서 '노출된' 헤더만 읽을 수 있으므로, main.ts 의 enableCors 에
+  //   exposedHeaders 로 Content-Disposition 을 열어 둬야 프론트가 이름을 받을 수 있다.
+  //   (그 설정을 지우면 프론트 다운로드 파일 이름이 조용히 'download' 로 바뀐다.)
+  @Get('export')
+  async exportRawData(
+    @Res({ passthrough: true }) res: Response,
+    @Query('competitionId') competitionId?: string,
+  ): Promise<StreamableFile> {
+    const file = await this.exporter.buildWorkbook(this.parseCompetitionId(competitionId));
+    res.set({
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      // 파일 이름은 한글이 섞인다 → ASCII 예비값 + RFC 5987(UTF-8) 둘 다 보낸다.
+      // 예비값이 없으면 옛 브라우저가 헤더를 통째로 무시해 이름이 URL 로 저장된다.
+      'Content-Disposition':
+        `attachment; filename="rawdata.xlsx"; ` +
+        `filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
+      // 화면에서 "몇 행 받았는지" 보여주려고 같이 실어 보낸다(본문을 열지 않아도 알 수 있게).
+      'X-Rawdata-Rows': String(file.rowCount),
+    });
+    return new StreamableFile(file.buffer);
   }
 
   // [변경: 2026-07-14 17:32, 김병현 수정] 옛 GET /seasons(데이터 있는 시즌 문자열 목록) +

@@ -14,6 +14,7 @@ import { StatsService } from '../src/stats/stats.service';
 import { StoreService } from '../src/stats/store.service';
 import { ParserService } from '../src/stats/parser.service';
 import { CompetitionService } from '../src/stats/competition.service';
+import { ExportService } from '../src/stats/export.service';
 import { StatEvent } from '../src/stats/types';
 
 // 진짜처럼 동작하는 인메모리 저장소. 넘어온 filter 를 기록하고, 그 필터를 실제로 적용한다.
@@ -152,6 +153,10 @@ async function main(): Promise<void> {
       null as unknown as StoreService,
       service,
       null as unknown as CompetitionService,
+      // [변경: 2026-08-25 16:40, 김병현 수정] 컨트롤러에 ExportService 가 추가됐다.
+      // 이 검증은 /players 경로만 보므로 내보내기는 안 부른다 → null 로 채운다
+      // (부르면 그 자리에서 터진다 = 조용히 잘못 도는 것보다 낫다).
+      null as unknown as ExportService,
     );
 
     await controller.player('강백호', '2');
