@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 // 연장 병합(스탯 뷰) — 아래 rosterEvents 주석 참고.
 import { gameKey, mergeOvertimeGames } from './aggregate';
@@ -30,6 +30,9 @@ import {
  */
 @Injectable()
 export class ChampionshipService {
+  // 선수 명단 조회 실패를 '조용히 넘기되 흔적은 남기려고' 쓴다(overview 주석 참고).
+  private readonly logger = new Logger(ChampionshipService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly store: StoreService,
@@ -86,14 +89,33 @@ export class ChampionshipService {
    * [+] 가 눌려 "줄은 늘었는데 횟수는 그대로"인 어긋난 화면이 나온다.
    */
   async overview(): Promise<ChampionshipOverview> {
-    const rows = await this.prisma.championshipWin.findMany({
-      include: { competition: true },
-      orderBy: [
-        { competition: { year: 'desc' } },
-        { competition: { seasonNo: { sort: 'desc', nulls: 'last' } } },
-        { player: 'asc' },
-      ],
-    });
+    // 우승 줄과 전체 선수 명단은 서로를 안 기다려도 된다(DB 가 원격이라 왕복이 아깝다).
+    const [rows, seasonsByPlayer] = await Promise.all([
+      this.prisma.championshipWin.findMany({
+        include: { competition: true },
+        orderBy: [
+          { competition: { year: 'desc' } },
+          { competition: { seasonNo: { sort: 'desc', nulls: 'last' } } },
+          { player: 'asc' },
+        ],
+      }),
+      // [변경: 2026-09-02 김병현 수정] 조회 하나로 두 가지를 얻는다:
+      //   키(선수 이름) → 우승 0회 선수까지 표에 넣기 위한 전체 명단
+      //   값(시즌 수)   → 우승 승률의 분모
+      // 둘을 따로 읽으면 왕복이 하나 늘고, "명단엔 있는데 시즌 수엔 없는 사람"이라는
+      // 있을 수 없는 상태를 다뤄야 한다.
+      //
+      // ⚠ 실패해도 던지지 않고 삼킨다. 이건 '보조 정보'다 — 못 구했다고 우승 기록 전체를
+      //   못 보여주면, 얻는 것(0회 선수·승률) 없이 잃는 것(화면 전체)만 남는다.
+      //   그때는 옛 동작대로 우승자만, 승률은 null(모름)로 나온다(0% 라고 지어내지 않는다).
+      //   업로드 경로가 같은 이유로 같은 정책을 쓴다(stats.controller.ts 의 이름 확인 주석).
+      this.store.listPlayerSeasonCounts().catch((err: unknown) => {
+        this.logger.warn(
+          `선수 시즌 수 조회 실패 — 우승 0회 선수와 승률이 표에서 빠집니다: ${(err as Error).message}`,
+        );
+        return undefined;
+      }),
+    ]);
 
     const wins: ChampionshipWinView[] = rows.map((r) => ({
       id: r.id,
@@ -112,6 +134,7 @@ export class ChampionshipService {
       // 우승 줄은 많아야 수백 개라 세는 비용이 사실상 없다.
       playerWins: countWinsByPlayer(
         wins.map((w) => ({ player: w.player, title: w.competitionLabel })),
+        seasonsByPlayer,
       ),
     };
   }

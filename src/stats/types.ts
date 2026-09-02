@@ -210,6 +210,12 @@ export interface PlayerWins {
   player: string;
   wins: number;
   titles: string[]; // 어느 대회들에서 우승했는지 (숫자의 근거를 눈으로 확인하려고 같이 준다)
+  // [신설: 2026-09-02 김병현 작성] 뛴 시즌(대회) 수 — 승률의 분모.
+  // 한 대회에 한 경기만 나와도 1시즌으로 친다(그 시즌의 우승 자격이 있었다는 뜻이라서).
+  seasons: number;
+  // 우승 승률(%) = wins / seasons, 소수 첫째 자리. 예: 5/12 → 41.7
+  // ⚠ seasons 가 0이면 0 이 아니라 null 이다 — "한 번도 못 이김"과 "잰 적 없음"은 다른 말이다.
+  winRate: number | null;
 }
 
 // 우승 관리 화면의 선수 표 한 줄.
@@ -257,6 +263,9 @@ export interface ChampionshipWinView {
 // [+] 가 눌려서 "줄은 늘었는데 횟수는 그대로"인 어긋난 화면이 나올 수 있다.
 export interface ChampionshipOverview {
   wins: ChampionshipWinView[];
+  // [변경: 2026-09-02 김병현 수정] **우승 0회 선수도 들어 있다**(경기 기록이 있는 모든 선수).
+  // 우승자만 주면 "내 이름이 왜 없지?"가 되고, 0회인지 명단 누락인지 구분이 안 된다.
+  // ⚠ 예외: 선수 명단 조회가 실패한 드문 경우엔 우승자만 담긴다(0회를 지어내지 않는다).
   playerWins: PlayerWins[];
 }
 

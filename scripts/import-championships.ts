@@ -31,8 +31,58 @@ import {
   readSheetWinCounts,
 } from './championshipSheetReader';
 
+// 우승 시트엔 있는데 그 대회 경기 기록엔 없는 (대회, 선수) 한 건.
+interface GhostWinner {
+  label: string; // 대회 라벨
+  player: string; // 시트에 적힌 이름
+  similar: string[]; // 그 대회에 실제로 뛴 비슷한 이름(숫자 접미사만 다른 것)
+}
+
 // 인자를 안 주면 읽을 기본 파일. 이 저장소의 원본 기록지다.
 const DEFAULT_FILE = path.join(__dirname, 'fixtures', 'rawdata.xlsx');
+
+/**
+ * [신설: 2026-09-02 김병현 작성] 엑셀 '우승' 시트의 알려진 이름 오류 정정표.
+ *
+ * 왜 필요한가: '우승' 시트는 동명이인 접미사(1/2)가 rawdata 시트와 어긋나 있다.
+ * 그대로 넣으면 "그 대회에 뛴 기록이 없는 우승자"가 생기고, 그 선수의 승률 분모(뛴 시즌)가
+ * 0이 돼 승률을 못 낸다. DB 를 손으로 고쳐도 이 시드를 다시 돌리면 **틀린 이름이 되살아난다**
+ * (upsert 는 새 이름을 추가할 뿐 옛 줄을 지우지 않아서, 한 대회에 우승자가 둘이 된다).
+ * 그래서 정정을 여기 못박아 둔다 — 몇 번을 돌려도 같은 답이 나오게.
+ *
+ * 확인 출처: 사용자 확인 (2026-09-02)
+ *   - 김진우2 는 김진우 와 같은 사람이다 (김진우2 는 경기 기록이 0건인 유령 이름).
+ *   - 2023 시즌1 우승자로 적힌 '김진우' 는 실제로는 김진우1 이다 (그 시즌엔 김진우1 만 뛰었다).
+ *
+ * ⚠ 진짜 해결은 엑셀 원본을 고치는 것이다. 이 표는 그때까지의 다리다.
+ *   원본을 고치면 여기 줄을 지워도 결과가 같아진다(정정할 게 없어져서 그냥 안 걸린다).
+ *
+ * (대회, 시트에 적힌 이름) → 실제 이름
+ */
+const NAME_FIXES: { year: number; seasonNo: number; from: string; to: string }[] = [
+  { year: 2023, seasonNo: 1, from: '김진우', to: '김진우1' },
+  { year: 2024, seasonNo: 1, from: '김진우2', to: '김진우' },
+];
+
+// 정정표를 한 우승 기록에 적용한다. 걸리는 게 없으면 원본을 그대로 돌려준다.
+// 바뀐 게 있으면 무엇을 바꿨는지 같이 돌려준다 — 조용히 바꾸면 안 되기 때문이다.
+function applyNameFixes(row: ChampionshipSheetRow): {
+  row: ChampionshipSheetRow;
+  applied: { from: string; to: string }[];
+} {
+  const fixes = NAME_FIXES.filter((f) => f.year === row.year && f.seasonNo === row.seasonNo);
+  if (fixes.length === 0) return { row, applied: [] };
+
+  const applied: { from: string; to: string }[] = [];
+  const players = row.players.map((p) => {
+    const hit = fixes.find((f) => f.from === p);
+    if (!hit) return p;
+    applied.push({ from: hit.from, to: hit.to });
+    return hit.to;
+  });
+  if (applied.length === 0) return { row, applied: [] };
+  return { row: { ...row, players }, applied };
+}
 
 // 우승 1건이 DB 의 어느 대회에 붙었는지(또는 왜 못 붙었는지).
 interface Resolution {
@@ -66,6 +116,64 @@ async function resolveCompetitions(
       problem: matches.length === 0 ? '대회 없음' : '대회 후보 2개 이상',
     };
   });
+}
+
+/**
+ * [신설: 2026-09-02 김병현 작성] "그 대회에 뛴 기록이 없는 우승자" 찾기.
+ *
+ * 왜 필요한가: 화면의 [+] 버튼은 서버가 이 검사를 한다(안 뛴 사람은 400 으로 막힌다).
+ * 그런데 이 시드는 시트를 곧이곧대로 믿고 넣어서 그 관문을 건너뛴다. 그래서 같은 검사를
+ * 여기서도 해 준다 — 안 그러면 두 경로가 서로 다른 규칙을 갖게 된다.
+ *
+ * ⚠ 찾아도 **건너뛰지는 않는다.** 시트는 사람이 남긴 역사 기록이라, 이름이 좀 틀렸다고
+ *   우승 사실 자체를 버리면 정보가 사라진다. 대신 시끄럽게 알려서 사람이 고치게 한다.
+ *   (실제로 이 저장소 데이터엔 '김진우 / 김진우1 / 김진우2' 접미사가 우승 시트에만 안 붙어
+ *    생긴 건이 2개 있다.)
+ */
+async function findGhostWinners(
+  prisma: PrismaClient,
+  resolutions: Resolution[],
+): Promise<GhostWinner[]> {
+  // (선수, 대회) 쌍 = "그 사람이 그 대회에 나왔다"는 사실 한 줄. 한 번에 다 읽어 메모리에서 대조한다.
+  const pairs = await prisma.statEvent.groupBy({ by: ['player', 'competitionId'] });
+  const played = new Set(pairs.map((x) => `${x.competitionId}|${x.player}`));
+
+  // 이름에서 끝 숫자를 뗀 것이 같으면 '비슷한 이름'으로 본다(김진우2 ↔ 김진우1 ↔ 김진우).
+  const baseOf = (name: string) => name.replace(/\d+$/, '');
+
+  const ghosts: GhostWinner[] = [];
+  for (const r of resolutions) {
+    if (r.competitionId == null) continue;
+    for (const player of r.row.players) {
+      if (played.has(`${r.competitionId}|${player}`)) continue;
+      ghosts.push({
+        label: r.label ?? String(r.competitionId),
+        player,
+        similar: pairs
+          .filter((x) => x.competitionId === r.competitionId && baseOf(x.player) === baseOf(player))
+          .map((x) => x.player),
+      });
+    }
+  }
+  return ghosts;
+}
+
+function printGhostWinners(ghosts: GhostWinner[]): void {
+  if (ghosts.length === 0) {
+    console.log('\n이름 확인: 우승자 전원이 그 대회 경기 기록에 있어요. ✓');
+    return;
+  }
+  console.log(`\n⚠ 그 대회 경기 기록이 없는 우승자 ${ghosts.length}명 (그래도 적재는 합니다):`);
+  for (const g of ghosts) {
+    const hint = g.similar.length
+      ? `그 대회에 뛴 비슷한 이름: ${g.similar.join(', ')}`
+      : '비슷한 이름도 없음';
+    console.log(`  · ${g.label} | ${g.player} → ${hint}`);
+  }
+  console.log(
+    '    → 엑셀 우승 시트의 이름에 동명이인 접미사(1/2)가 빠졌을 가능성이 큽니다.\n' +
+      '      시트를 고쳐 다시 돌리거나, 우승횟수 관리 화면에서 직접 취소/등록하면 됩니다.',
+  );
 }
 
 // 붙은 것들만 실제로 넣는다. 같은 (대회, 선수) 는 upsert 라 몇 번 돌려도 결과가 같다(멱등).
@@ -192,8 +300,21 @@ async function main(): Promise<void> {
   // (읽기만 하고 쓰기는 안 한다).
   const prisma = new PrismaClient();
   try {
-    const resolutions = await resolveCompetitions(prisma, result.rows);
+    // 정정표를 먼저 적용한다. 대회 연결·이름 확인·적재가 전부 '고쳐진 이름'을 보게 하려고
+    // 여기 한 곳에서 한 번만 바꾼다(각 단계가 따로 고치면 반드시 한 곳이 빠진다).
+    const fixed = result.rows.map(applyNameFixes);
+    const appliedFixes = fixed.flatMap((f) =>
+      f.applied.map((a) => `${f.row.year} 시즌${f.row.seasonNo}: ${a.from} → ${a.to}`),
+    );
+    if (appliedFixes.length > 0) {
+      console.log(`\n알려진 이름 오류 ${appliedFixes.length}건 자동 정정 (NAME_FIXES):`);
+      for (const line of appliedFixes) console.log(`  · ${line}`);
+    }
+
+    const resolutions = await resolveCompetitions(prisma, fixed.map((f) => f.row));
     printResolution(resolutions);
+    // 이름 확인도 읽기 전용이라 dry-run 에서도 돌린다 — 적재 전에 미리 보는 게 이 검사의 요점이다.
+    printGhostWinners(await findGhostWinners(prisma, resolutions));
 
     if (dryRun) {
       console.log('\n[dry-run] DB 에 쓰지 않았습니다. 위 연결 표를 확인한 뒤 --dry-run 없이 다시 실행하세요.');

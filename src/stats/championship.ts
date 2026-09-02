@@ -70,15 +70,53 @@ export function playerTeamUsage(events: StatEvent[]): PlayerTeamUsage[] {
 //
 // titles 를 같이 돌려주는 이유: 화면에서 "5회" 옆에 어느 시즌들인지 바로 보여줄 수 있고,
 // 숫자가 이상할 때 근거를 눈으로 확인할 수 있다(횟수만 주면 "왜 5지?"를 되물을 방법이 없다).
-export function countWinsByPlayer(records: WinRecord[]): PlayerWins[] {
+//
+// [변경: 2026-09-02 김병현 수정] allPlayers 추가 — **우승이 한 번도 없는 선수까지 0회로 넣는다.**
+//
+// 왜 필요한가: 우승 줄만 세면 우승자만 나온다. 그럼 "내 이름이 왜 없지?"가 되고,
+// 0회인지 명단에서 빠진 건지 구분이 안 된다. 0 을 명시적으로 보여주는 게 정직하다.
+// (원본 rawdata.xlsx 의 '선수명' 시트도 우승 0회 선수까지 전부 적혀 있다 — 그 결을 따른다.)
+//
+// seasonsByPlayer 는 한 인자로 두 가지 일을 한다 — 일부러 그렇게 뒀다.
+//   키(선수 이름) = 아는 선수 전원 → 우승 0회 선수를 0으로 깔아 두는 명단
+//   값(시즌 수)   = 승률의 분모
+// 두 값이 애초에 같은 조회 하나에서 나오기 때문이다(store.listPlayerSeasonCounts).
+// 따로 받으면 "명단엔 있는데 시즌 수엔 없는 사람"이라는, 있을 수 없는 상태를 다뤄야 한다.
+//
+// 안 주면 옛 동작 그대로(우승자만, seasons 0, winRate null). 명단을 못 구했을 때 "0회 선수가
+// 없다"거나 "승률 0%"라고 지어내지 않으려는 것이다 — 빈 Map 과 안 줌(undefined)은 뜻이 다르다.
+export function countWinsByPlayer(
+  records: WinRecord[],
+  seasonsByPlayer?: ReadonlyMap<string, number>,
+): PlayerWins[] {
   const map = new Map<string, string[]>();
+  // 명단을 먼저 0회로 깔아 둔다. 그 다음 우승 줄을 얹으면 우승자는 자연스럽게 채워진다.
+  // (반대 순서로 하면 이미 채운 선수를 다시 0으로 덮어쓰지 않게 조건을 하나 더 써야 한다.)
+  for (const p of seasonsByPlayer?.keys() ?? []) if (!map.has(p)) map.set(p, []);
   for (const r of records) {
     const titles = map.get(r.player);
     if (titles) titles.push(r.title);
     else map.set(r.player, [r.title]);
   }
   return [...map.entries()]
-    .map(([player, titles]) => ({ player, wins: titles.length, titles }))
+    .map(([player, titles]) => {
+      const wins = titles.length;
+      const seasons = seasonsByPlayer?.get(player) ?? 0;
+      return { player, wins, titles, seasons, winRate: winRateOf(wins, seasons) };
+    })
     // 많이 우승한 순 → 이름순. 표를 그대로 순위처럼 읽을 수 있게.
+    // 0회 선수들은 자연히 맨 아래에 가나다순으로 모인다.
+    // (승률로 정렬하지 않는 이유: 1시즌 뛰고 1번 우승한 사람이 100% 로 맨 위에 오면
+    //  '통산 우승 순위'라는 이름과 어긋난다. 승률은 옆에 붙는 참고값이다.)
     .sort((a, b) => b.wins - a.wins || a.player.localeCompare(b.player, 'ko'));
+}
+
+// 우승 승률(%) = 우승 횟수 ÷ 뛴 시즌 수. 소수 첫째 자리까지.
+//
+// 시즌 수가 0이면 0% 가 아니라 **null(= 모름)** 이다. 0으로 나눌 수 없기도 하지만,
+// 뜻이 다르다: "10시즌 뛰고 한 번도 못 이김"(0%)과 "잰 적이 없음"(null)은 같은 말이 아니다.
+// 실제로 이 상황은 선수 명단을 못 구했을 때만 생긴다.
+function winRateOf(wins: number, seasons: number): number | null {
+  if (seasons <= 0) return null;
+  return Math.round((wins / seasons) * 1000) / 10;
 }

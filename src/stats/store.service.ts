@@ -114,6 +114,23 @@ export class StoreService {
     return groups.map((g) => g.player);
   }
 
+  // [신설: 2026-09-02 김병현 작성] 선수별 "뛴 시즌(대회) 수". 우승 승률의 분모다.
+  //
+  // (player, competitionId) 로 그룹핑하면 "그 선수가 그 대회에 나왔다"는 사실 한 줄이 나온다
+  // — 한 대회에서 이벤트를 수천 개 찍어도 한 줄이다. 그걸 선수별로 세면 곧 시즌 수다.
+  //
+  // 왜 캐시(getEvents)를 안 쓰나: 이건 '전체 대회'를 훑어야 나오는 값인데, 그러자고
+  // 이벤트 7만 건을 메모리로 끌어오는 건 과하다. DB 가 세면 (선수 × 대회) 몇백 줄만 오간다.
+  //
+  // ⚠ 반환에는 **경기 기록이 있는 선수만** 들어온다. 즉 이 Map 의 키 = 아는 선수 전원이라,
+  //   listKnownPlayerNames() 와 같은 명단이다(호출부가 둘 중 하나만 불러도 되게 이렇게 뒀다).
+  async listPlayerSeasonCounts(): Promise<Map<string, number>> {
+    const pairs = await this.prisma.statEvent.groupBy({ by: ['player', 'competitionId'] });
+    const counts = new Map<string, number>();
+    for (const p of pairs) counts.set(p.player, (counts.get(p.player) ?? 0) + 1);
+    return counts;
+  }
+
   // 특정 대회에 이벤트를 추가 (증분 적재)
   // [변경: 2026-07-14 17:32, 김병현 수정] appendSeason → appendCompetition, competitionId 기준.
   async appendCompetition(competitionId: number, events: ParsedEvent[]): Promise<number> {

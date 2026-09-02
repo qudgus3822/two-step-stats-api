@@ -19,8 +19,10 @@ import { ChampionshipWinView, PlayerWins, RawDataCell } from './types';
 export const CHAMPIONSHIP_SHEET_TITLES = '우승';
 export const CHAMPIONSHIP_SHEET_COUNTS = '우승횟수';
 
-// '우승횟수' 시트의 헤더. 원본 '선수명' 시트의 칸 이름을 그대로 쓴다.
-const COUNT_HEADERS = ['선수명', '우승횟수'];
+// '우승횟수' 시트의 헤더. 앞 두 칸은 원본 '선수명' 시트의 칸 이름을 그대로 쓴다.
+// [변경: 2026-09-02 김병현 수정] 뛴시즌·승률 두 칸을 뒤에 덧붙였다.
+// 뒤에 붙인 게 중요하다 — 원본 칸의 자리를 안 밀어서, 기존 엑셀 수식이 그대로 동작한다.
+const COUNT_HEADERS = ['선수명', '우승횟수', '뛴시즌', '승률(%)'];
 
 /**
  * '우승' 시트 격자.
@@ -53,11 +55,18 @@ export function toTitlesGrid(wins: ChampionshipWinView[]): RawDataCell[][] {
   return grid;
 }
 
-// '우승횟수' 시트 격자. 헤더 한 줄 + (선수명, 횟수) 줄들.
-// 정렬은 손대지 않는다 — 넘겨받은 순서(countWinsByPlayer 가 만든 '많이 우승한 순')가
-// 곧 화면에 보이는 순서라, 파일과 화면이 같은 순서여야 대조하기 쉽다.
+// '우승횟수' 시트 격자. 헤더 한 줄 + (선수명, 우승횟수, 뛴시즌, 승률) 줄들.
+//
+// 우승 0회 선수도 그대로 들어간다 — 원본 '선수명' 시트도 전원이 적혀 있었다(0회 포함).
+// 정렬은 손대지 않는다: 넘겨받은 순서(countWinsByPlayer 의 '많이 우승한 순')가 곧 화면 순서라,
+// 파일과 화면이 같아야 눈으로 대조할 수 있다.
 export function toCountsGrid(playerWins: PlayerWins[]): RawDataCell[][] {
-  return [COUNT_HEADERS, ...playerWins.map((p) => [p.player, p.wins])];
+  return [
+    COUNT_HEADERS,
+    // 승률이 null 이면 '' 로 비운다. 0 을 넣으면 "0% 로 쟀다"는 거짓말이 되고,
+    // 빈칸은 엑셀에서도 '값 없음'으로 그대로 읽힌다(평균 계산에서 자동으로 빠진다).
+    ...playerWins.map((p) => [p.player, p.wins, p.seasons, p.winRate ?? '']),
+  ];
 }
 
 // 파일 이름. 날짜를 붙여 여러 번 받아도 다운로드 폴더에서 안 덮어쓴다(rawExport 와 같은 규칙).
