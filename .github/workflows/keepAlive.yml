@@ -1,0 +1,47 @@
+# [신설: 2026-09-02 09:41, 김병현 작성]
+# Supabase 무료 플랜은 7일 동안 아무 요청도 없으면 프로젝트를 일시정지시킨다.
+# 그래서 3일에 한 번 DB에 아주 가벼운 쿼리(select 1)를 날려서 "살아있음"을 알린다.
+name: supabase-keep-alive
+
+on:
+  schedule:
+    # 3일마다 UTC 03:00 (한국시간 정오). GitHub cron 은 혼잡하면 몇십 분 늦게 도는 게 정상이라
+    # 7일 마감보다 넉넉하게 3일 주기로 잡았다.
+    - cron: '0 3 */3 * *'
+  # 수동 실행 버튼. 스케줄이 잘 도는지 바로 확인할 때 쓴다.
+  workflow_dispatch:
+
+# 같은 워크플로가 겹쳐 도는 걸 막는다(쿼리 하나짜리라 굳이 중복 실행할 이유가 없음).
+concurrency:
+  group: supabase-keep-alive
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    # 커넥션이 막히면 러너를 오래 붙잡지 않도록 짧게 끊는다.
+    timeout-minutes: 5
+    steps:
+      - name: Supabase Postgres 깨우기
+        env:
+          # 레포 Settings > Secrets and variables > Actions 에 DATABASE_URL 등록 필요.
+          # 반드시 풀러(pooler) 주소를 써야 한다 — GitHub 러너는 IPv4 라서
+          # db.<ref>.supabase.co (IPv6 전용) 로는 접속이 안 된다.
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "DATABASE_URL 시크릿이 비어 있음. 레포 Actions secrets 에 등록해줘." >&2
+            exit 1
+          fi
+          # 일시정지에서 깨어나는 데 시간이 좀 걸릴 수 있어 3번까지 재시도한다.
+          for i in 1 2 3; do
+            if psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc 'select 1;'; then
+              echo "ping ok (시도 $i회차)"
+              exit 0
+            fi
+            echo "ping 실패, 30초 뒤 재시도 ($i/3)" >&2
+            sleep 30
+          done
+          echo "3번 다 실패. Supabase 대시보드에서 프로젝트 상태 확인 필요." >&2
+          exit 1
