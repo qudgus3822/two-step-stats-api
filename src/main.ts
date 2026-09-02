@@ -16,9 +16,13 @@ async function bootstrap(): Promise<void> {
   // CORS 기본값에서 fetch 가 읽을 수 있는 헤더는 몇 개 안 되는 '안전 목록'뿐이라,
   // 아무리 서버가 보내도 Content-Disposition 은 프론트에서 안 보인다(에러도 안 난다 —
   // 그냥 null 이라 파일 이름이 조용히 'download' 가 된다). 그래서 명시적으로 노출한다.
-  //  - Content-Disposition : 서버가 지은 파일 이름 (GET /api/export)
+  //  - Content-Disposition : 서버가 지은 파일 이름 (GET /api/export, /api/championships/export)
   //  - X-Rawdata-Rows      : 내보낸 행 수 (화면 안내용)
-  app.enableCors({ exposedHeaders: ['Content-Disposition', 'X-Rawdata-Rows'] });
+  // [변경: 2026-09-02 김병현 수정] 우승 기록 내보내기의 건수 헤더 추가.
+  //  - X-Championship-Rows : 내보낸 우승 줄 수
+  app.enableCors({
+    exposedHeaders: ['Content-Disposition', 'X-Rawdata-Rows', 'X-Championship-Rows'],
+  });
   const port = process.env.PORT ? Number(process.env.PORT) : 13000;
   await app.listen(port);
   new Logger('Bootstrap').log(`투스텝 기록 API 서버 실행: http://localhost:${port}`);

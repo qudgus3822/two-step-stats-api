@@ -23,6 +23,8 @@ model Competition {
   label     String      @unique // 표시 라벨 겸 유니크 키. competitionLabel() 이 만든 값(예: "2026 시즌3 · 나이배")
   createdAt DateTime    @default(now())
   events    StatEvent[] // 이 대회에 속한 이벤트들
+  // [신설: 2026-09-02 김병현 작성] 이 대회의 우승자들(선수마다 한 줄).
+  wins      ChampionshipWin[]
 
   @@map("competitions")
 }
@@ -47,4 +49,33 @@ model StatEvent {
   @@index([competitionId, week, game])
   @@index([player])
   @@map("stat_events")
+}
+
+// [신설: 2026-09-02 김병현 작성] 우승 기록 — "한 줄 = 선수 한 명의 우승 하나".
+//
+// 왜 팀 명단(배열) 한 줄이 아니라 선수마다 한 줄인가:
+// 이 동호회는 같은 시즌에 상대팀으로도 한 번 뛰고, 용병으로 여러 경기를 뛰고도 우승자로는
+// 안 치는 경우가 있다. 그래서 "누가 우승자인가"는 계산이 아니라 사람이 한 명씩 판단해야 한다.
+// 화면도 선수마다 [+] / [취소] 를 누르는 모양이라, 저장 단위도 선수 하나여야 딱 맞는다
+// (배열이면 그 안을 헤집어 한 명만 빼야 하는데, 줄이면 그냥 지우면 된다).
+//
+// @@unique([competitionId, player]) 가 "같은 대회에서 같은 선수가 두 번 우승"을 DB 차원에서 막는다.
+// 그래서 [+] 는 몇 번을 눌러도 결과가 같다(멱등) — 화면이 두 번 눌려도 횟수가 2로 튀지 않는다.
+//
+// teamName 은 "그 대회에서 그 선수가 가장 많이 뛴 팀"을 저장 시점에 서버가 계산해 박아 둔다.
+// 왜 저장하나(매번 계산하지 않고): 우승 팀 이름은 그때의 사실이다. 나중에 경기 기록을 고치면
+// 계산값은 조용히 바뀌지만, 이미 확정된 우승의 팀 이름까지 따라 바뀌면 안 된다.
+model ChampionshipWin {
+  id            Int         @id @default(autoincrement())
+  // onDelete: Restrict — stat_events 와 같은 정책. 우승 기록이 달린 대회는 지울 수 없다.
+  // (실무상 우승 기록이 있는 대회엔 경기 기록도 반드시 있어서, 이미 stat_events 쪽에서 먼저 막힌다.)
+  competitionId Int
+  competition   Competition @relation(fields: [competitionId], references: [id], onDelete: Restrict)
+  player        String // 선수 이름 (stat_events.player 와 같은 표기 — '김진우1' 같은 동명이인 접미사 유지)
+  teamName      String // 우승 당시 팀 이름 (위 주석 참고)
+  createdAt     DateTime    @default(now())
+
+  @@unique([competitionId, player])
+  @@index([player])
+  @@map("championship_wins")
 }

@@ -1,9 +1,18 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import * as XLSX from 'xlsx';
+// [변경: 2026-09-02 김병현 수정] 우승 기록 내보내기 — 데이터는 이쪽이 쥐고 있다.
+import { ChampionshipService } from './championship.service';
+import {
+  CHAMPIONSHIP_SHEET_COUNTS,
+  CHAMPIONSHIP_SHEET_TITLES,
+  championshipFileName,
+  toCountsGrid,
+  toTitlesGrid,
+} from './championshipExport';
 import { CompetitionService } from './competition.service';
 import { buildRawDataRows, rawDataFileName, toSheetGrid } from './rawExport';
 import { StoreService } from './store.service';
-import { RawDataExport } from './types';
+import { ChampionshipExport, RawDataCell, RawDataExport } from './types';
 
 /**
  * [신설: 2026-08-25 16:40, 김병현 작성]
@@ -28,6 +37,8 @@ export class ExportService {
   constructor(
     private readonly store: StoreService,
     private readonly competitions: CompetitionService,
+    // [변경: 2026-09-02 김병현 수정] 우승 기록 내보내기용.
+    private readonly championships: ChampionshipService,
   ) {}
 
   /**
@@ -82,6 +93,45 @@ export class ExportService {
       `원본 데이터 내보내기: ${rows.length.toLocaleString()}행 · ${fileName} · ${Date.now() - started}ms`,
     );
     return { buffer, fileName, rowCount: rows.length };
+  }
+
+  /**
+   * [신설: 2026-09-02 김병현 작성] 우승 기록을 시트 2장짜리 .xlsx 로 만든다.
+   *
+   *   '우승'     — 연도 헤더줄 + (시즌 | 팀명 | 멤버들). 원본 rawdata.xlsx 의 '우승' 시트 모양.
+   *   '우승횟수' — 선수명 | 우승횟수. 원본 '선수명' 시트의 우승횟수 칸을 뽑아낸 표.
+   *
+   * rawdata 내보내기와 달리 **대회를 고르지 않는다** — 우승 기록은 통산으로 보는 게 기본이고
+   * (표의 요점이 '누가 몇 번'이다), 전부 합쳐야 수백 줄이라 나눌 이유가 없다.
+   *
+   * 기록이 하나도 없어도 에러가 아니다. 헤더만 있는 파일이 정상적인 답이다
+   * (rawdata 쪽이 404 를 던지는 건 '없는 대회를 지목했을 때'라 상황이 다르다).
+   */
+  async buildChampionshipWorkbook(): Promise<ChampionshipExport> {
+    const started = Date.now();
+    const { wins, playerWins } = await this.championships.overview();
+
+    const book = XLSX.utils.book_new();
+    this.appendSheet(book, CHAMPIONSHIP_SHEET_TITLES, toTitlesGrid(wins));
+    this.appendSheet(book, CHAMPIONSHIP_SHEET_COUNTS, toCountsGrid(playerWins));
+
+    const buffer = XLSX.write(book, {
+      type: 'buffer',
+      bookType: 'xlsx',
+      compression: true,
+    }) as Buffer;
+
+    const fileName = championshipFileName(this.todayStamp());
+    this.logger.log(
+      `우승 기록 내보내기: 우승 ${wins.length}줄 · 선수 ${playerWins.length}명 · ${fileName} · ${Date.now() - started}ms`,
+    );
+    // rowCount 는 '우승 줄 수'다 — 화면이 "몇 건 받았어요"로 보여주는 값.
+    return { buffer, fileName, rowCount: wins.length };
+  }
+
+  // 격자 하나를 시트로 만들어 통에 붙인다. 시트가 둘 이상이라 세 줄이 반복돼서 묶어 뒀다.
+  private appendSheet(book: XLSX.WorkBook, name: string, grid: RawDataCell[][]): void {
+    XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(grid), name);
   }
 
   // 파일 이름에 붙일 오늘 날짜(YYYYMMDD). 서버 지역시간 기준 — 이 앱은 한 지역에서만 쓴다.

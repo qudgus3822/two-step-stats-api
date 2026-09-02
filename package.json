@@ -24,6 +24,7 @@
     "check:export": "ts-node scripts/check-export.ts",
     "fix:playerspaces": "ts-node scripts/fix-player-spaces.ts",
     "import:legacy": "ts-node scripts/import-legacy-xlsx.ts",
+    "import:championships": "ts-node scripts/import-championships.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

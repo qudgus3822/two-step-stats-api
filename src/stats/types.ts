@@ -176,3 +176,93 @@ export interface RawDataExport {
   fileName: string; // 예: 'rawdata_2023 시즌1 · 나이배_20260825.xlsx'
   rowCount: number; // 헤더를 뺀 데이터 행 수(로그·응답 헤더용)
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [신설: 2026-09-02 김병현 작성] 우승 기록
+//
+// 저장 단위가 "선수 한 명의 우승 하나"라, 여기 타입들도 전부 그 알갱이를 중심으로 돈다.
+// 팀 명단은 따로 저장하지 않는다 — 같은 대회의 우승 줄들을 모으면 그게 곧 명단이다.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// 한 선수가 한 팀으로 뛴 경기 수. (이벤트 수가 아니라 경기 수다 — 20개 찍어도 1경기)
+export interface TeamGameCount {
+  team: string;
+  games: number;
+}
+
+// 한 대회에서 한 선수가 "어느 팀으로 몇 경기 뛰었나".
+export interface PlayerTeamUsage {
+  player: string;
+  totalGames: number; // 팀 상관없이 그 대회에서 뛴 총 경기 수
+  // 많이 뛴 순으로 정렬돼 있다 → teams[0] 이 "가장 많이 뛴 팀".
+  // 이벤트가 있으면 반드시 1개 이상이지만, 소비자는 빈 배열도 견뎌야 한다(방어적 읽기).
+  teams: TeamGameCount[];
+}
+
+// countWinsByPlayer 의 입력 한 줄. 계산에 필요한 두 칸만 받는다(좁은 입구).
+export interface WinRecord {
+  player: string;
+  title: string; // 그 우승의 이름표 — 대회 라벨을 그대로 쓴다 (예: '2025 시즌4 · -')
+}
+
+// 선수 한 명의 통산 우승 성적.
+export interface PlayerWins {
+  player: string;
+  wins: number;
+  titles: string[]; // 어느 대회들에서 우승했는지 (숫자의 근거를 눈으로 확인하려고 같이 준다)
+}
+
+// 우승 관리 화면의 선수 표 한 줄.
+// "이 사람을 우승자로 찍을까?"를 판단하는 데 필요한 것만 담는다.
+export interface ChampionshipRosterPlayer {
+  player: string;
+  // 이 대회에서 가장 많이 뛴 팀. 이벤트가 있으면 항상 값이 있지만, 만일을 위해 null 허용.
+  // [+] 를 누르면 서버가 저장 시점에 이 값을 다시 계산해서 박는다(화면이 낡았어도 안전하게).
+  topTeam: string | null;
+  topTeamGames: number; // 그 팀으로 뛴 경기 수
+  totalGames: number; // 이 대회에서 뛴 총 경기 수 → 'topTeamGames / totalGames' 가 용병 판별 근거
+  careerWins: number; // 통산 우승횟수 (이 대회 것 포함)
+  // 이 대회에서 이미 우승자로 찍혀 있나. true 면 버튼이 [취소] 로 바뀐다.
+  won: boolean;
+  // 찍혀 있을 때 저장된 팀 이름. won=false 면 null.
+  // topTeam 과 다를 수 있다 — 우승 확정 후에 경기 기록이 고쳐지면 계산값만 바뀌기 때문이다.
+  // 그 어긋남은 숨기지 않고 화면에 보여준다.
+  wonTeamName: string | null;
+}
+
+// 우승 관리 화면이 한 번에 받는 것: 어느 대회인지 + 그 대회 선수 표.
+export interface ChampionshipRoster {
+  competitionId: number;
+  competitionLabel: string;
+  gameCount: number; // 그 대회의 총 경기 수(연장 병합 기준). 표의 '몇 경기 중' 분모와 같은 뷰다.
+  players: ChampionshipRosterPlayer[];
+}
+
+// 우승 기록 한 줄(조회용). DB 행에 대회 정보를 붙여 화면이 바로 쓰게 만든 모양.
+export interface ChampionshipWinView {
+  id: number;
+  competitionId: number;
+  competitionLabel: string;
+  year: number;
+  seasonNo: number | null;
+  // 대회명(예: '나이배'). 라벨에서 잘라 쓰지 않고 따로 싣는 이유: 내보내기 '우승' 시트의
+  // 첫 칸이 시즌번호 없는 대회에선 이 이름이라서다(있으면 '시즌3', 없으면 '나이배').
+  competitionName: string;
+  player: string;
+  teamName: string;
+}
+
+// 우승 기록 전체 보기: 원본 줄들 + 거기서 센 통산 횟수.
+// 둘을 한 번에 주는 이유: 화면이 표 두 개를 같이 그리는데, 따로 부르면 그 사이에
+// [+] 가 눌려서 "줄은 늘었는데 횟수는 그대로"인 어긋난 화면이 나올 수 있다.
+export interface ChampionshipOverview {
+  wins: ChampionshipWinView[];
+  playerWins: PlayerWins[];
+}
+
+// 우승 기록 엑셀 내보내기 결과. RawDataExport 와 같은 모양(파일 이름은 서버가 짓는다).
+export interface ChampionshipExport {
+  buffer: Buffer;
+  fileName: string; // 예: 'championships_20260902.xlsx'
+  rowCount: number; // 우승 줄 수(헤더 제외) — 응답 헤더로 실어 화면에 보여준다
+}
